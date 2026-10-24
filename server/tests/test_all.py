@@ -85,6 +85,21 @@ class TestBridge(Base):
         res = self.tk.bridge.call(pid, "ping")
         self.assertTrue(res["pong"])
 
+    def test_platform_gate(self) -> None:
+        """Непроверенная платформа — сессия не выбирается; флаг снимает запрет."""
+        pid = self.tk._pid(None)
+        self.fake.platform = "8.3.24.100"
+        self.fake.heartbeat()
+        with self.assertRaises(NoSessionError) as cm:
+            self.tk.bridge.pick_session(pid)
+        self.assertIn("8.3.27", str(cm.exception))
+        self.cfg.allow_unverified_platform = True
+        self.assertEqual(self.tk.bridge.pick_session(pid), pid)
+        self.cfg.allow_unverified_platform = False
+        self.fake.platform = "8.3.27.2074"
+        self.fake.heartbeat()
+        self.assertEqual(self.tk.bridge.pick_session(pid), pid)
+
     def test_error_op_raises_with_code(self) -> None:
         pid = self.tk._pid(None)
         with self.assertRaises(BridgeError) as cm:

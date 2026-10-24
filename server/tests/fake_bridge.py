@@ -29,6 +29,7 @@ class FakeBridge:
         self.objects: dict[str, dict] = {}              # path -> md_object-подобный ответ
         self.active_title = "Конфигурация — Демо"
         self.focus_fail_times = 0
+        self.platform = "8.3.27.2074"
         self.args_seen: list[tuple[str, dict]] = []
         self._cache: dict[str, str] = {}
         self._stop = threading.Event()
@@ -48,7 +49,7 @@ class FakeBridge:
         self._write_session()
 
     def _write_session(self) -> None:
-        data = {"pid": self.pid, "conn": 'File="C:\\fake\\base";', "platform": "8.3.27.2074",
+        data = {"pid": self.pid, "conn": 'File="C:\\fake\\base";', "platform": self.platform,
                 "heartbeat": int(time.time() * 1000), "containers": [
                     {"index": 0, "identifier": "main", "isModified": False, "root": "Конфигурация"}]}
         self._atomic_write(self.sess / "session.json", json.dumps(data))

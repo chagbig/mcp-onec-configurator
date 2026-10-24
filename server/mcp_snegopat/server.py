@@ -29,7 +29,16 @@ GROUP_NAV: dict[str, dict[str, int | list]] = {
         "ПланыСчетов": 10, "ПланыВидовРасчета": 11, "РегистрыСведений": 12,
         "РегистрыНакопления": 13, "РегистрыБухгалтерии": 14, "РегистрыРасчета": 15,
         "БизнесПроцессы": 16, "Задачи": 17,
-        "Подсистемы": [1, 1],  # Общие -> Подсистемы
+        # узел «Общие» = 1; дети сняты автосъёмом 24.10.2026 (Insert по k-му ребёнку,
+        # класс из mdeAdd; 17=ОбщиеФормы и 18=ОбщиеМакеты открывают конструкторы —
+        # требуют wizard, координаты не внесены)
+        "Подсистемы": [1, 1], "ОбщиеМодули": [1, 2], "ПараметрыСеанса": [1, 3],
+        "Роли": [1, 4], "ОбщиеРеквизиты": [1, 5], "ПланыОбмена": [1, 6],
+        "КритерииОтбора": [1, 7], "ПодпискиНаСобытия": [1, 8],
+        "РегламентныеЗадания": [1, 9], "Боты": [1, 10],
+        "ФункциональныеОпции": [1, 11], "ПараметрыФункциональныхОпций": [1, 12],
+        "ОпределяемыеТипы": [1, 13], "ХранилищаНастроек": [1, 14],
+        "ОбщиеКоманды": [1, 15], "ГруппыКоманд": [1, 16],
     },
     "Справочник": {"Реквизиты": 1, "ТабличныеЧасти": 2, "Формы": 3, "Команды": 4, "Макеты": 5},
     "Документ": {"Реквизиты": 1, "ТабличныеЧасти": 2, "Формы": 3, "Команды": 4, "Макеты": 5},
@@ -49,6 +58,14 @@ SINGULAR: dict[str, str] = {
     "РегистрыБухгалтерии": "РегистрБухгалтерии", "РегистрыРасчета": "РегистрРасчета",
     "ЖурналыДокументов": "ЖурналДокументов", "БизнесПроцессы": "БизнесПроцесс",
     "Задачи": "Задача", "Роли": "Роль", "ОбщиеФормы": "ОбщаяФорма",
+    "ПараметрыСеанса": "ПараметрСеанса", "ОбщиеРеквизиты": "ОбщийРеквизит",
+    "КритерииОтбора": "КритерийОтбора", "ПодпискиНаСобытия": "ПодпискаНаСобытие",
+    "РегламентныеЗадания": "РегламентноеЗадание", "Боты": "Бот",
+    "ФункциональныеОпции": "ФункциональнаяОпция",
+    "ПараметрыФункциональныхОпций": "ПараметрФункциональныхОпций",
+    "ОпределяемыеТипы": "ОпределяемыйТип", "ХранилищаНастроек": "ХранилищеНастроек",
+    "ОбщиеКоманды": "ОбщаяКоманда", "ГруппыКоманд": "ГруппаКоманд",
+    "ПланыОбмена": "ПланОбмена", "Последовательности": "Последовательность",
 }
 
 INSTRUCTIONS = """\
@@ -170,12 +187,32 @@ class Toolkit:
                           self._a(container, path=path, prop=prop, edits=edits,
                                   expected_hash=expected_hash))
 
+    # guid типа «ЛокализуемаяСтрока» во внутреннем представлении 1С (снято с живого
+    # объекта 24.10.2026; строкой setProperty синоним не пишется — спайк этапа 1)
+    SYN_TYPE_GUID = "87024738-fc2a-4436-ada1-df79d395c424"
+
+    def _synonym_internal(self, synonym: str) -> str:
+        return '{"#",%s,\n{1,"ru","%s"}\n}' % (self.SYN_TYPE_GUID, synonym)
+
+    def md_set_synonym(self, session: int | None = None, container: int | None = None,
+                       path: str = "", synonym: str = "",
+                       expect_id: str | None = None) -> dict:
+        """Записать СИНОНИМ объекта (русский). Строкой setProperty не пишется (спайк
+        этапа 1) — пишется внутренним представлением локализуемой строки; постусловие
+        сверяет внутреннее значение. Проверено живьём 24.10.2026."""
+        if not synonym:
+            raise BridgeError("bad_args", "synonym обязателен")
+        return self._call(session, "prop_set_internal",
+                          self._a(container, path=path, prop="Синоним",
+                                  internal=self._synonym_internal(synonym),
+                                  expectId=expect_id))
+
     def md_set_property(self, session: int | None = None, container: int | None = None,
                         path: str = "", prop: str = "", value: str = "",
                         expected: str | None = None, uuid: str | None = None) -> dict:
         """Записать простое свойство (строка/число/булево текстом): "Имя", "Комментарий"...
         expected — текущее значение из md_object/prop_get (защита от параллельных правок);
-        для "Имя" обязательна uuid-сверка. Синоним (локализуемая строка) так не пишется."""
+        для "Имя" обязательна uuid-сверка. Синоним — отдельный инструмент md_set_synonym."""
         if not prop:
             raise BridgeError("bad_args", "prop обязателен")
         if prop == "Имя" and not uuid:
@@ -229,13 +266,15 @@ class Toolkit:
 
     def md_add_child(self, session: int | None = None, container: int | None = None,
                      owner_path: str | None = None, kind: str = "", name: str = "",
-                     comment: str | None = None, sibling: str | None = None,
+                     comment: str | None = None, synonym: str | None = None,
+                     sibling: str | None = None,
                      owner_class: str | None = None, nav_keys: list[int] | None = None,
                      wizard: dict | None = None) -> dict:
         """Создать объект метаданных в живом конфигураторе (этап 7: клавиатура в дереве).
         owner_path="" + kind="Справочники" — справочник верхнего уровня;
         owner_path="Справочник.Х", kind="Реквизиты" — реквизит (в т.ч. первый);
         kind — рус. МНОЖЕСТВЕННОЕ (Реквизиты, ТабличныеЧасти, Справочники, Подсистемы...).
+        synonym — русский синоним (иначе объект останется без синонима); comment — комментарий.
         По умолчанию навигация к узлу группы по классу владельца (снимок этапа 7);
         sibling="ИмяСоседа" — вставка рядом с существующим; nav_keys — вручную (VK_коды).
         Для форм wizard задает шаги конструктора: {caption, steps:[{click/set}], click:"ОК"}.
@@ -248,8 +287,10 @@ class Toolkit:
                               f"неизвестный вид {kind}; известны: {', '.join(sorted(SINGULAR))}")
         pid = self._pid(session)
         first, nav = False, None
+        expand_keys: list[int] | None = None
         if nav_keys:
             first, target = True, owner_path or ""
+            nav = nav_keys
         elif sibling:
             target = (owner_path + "." if owner_path else "") + expect + "." + sibling
         else:
@@ -269,10 +310,19 @@ class Toolkit:
                     + ", ".join(sorted(table)) + "; либо передайте sibling/nav_keys")
             first, target = True, owner_path or ""
             steps = k if isinstance(k, list) else [k]
-            nav = []
-            for s in steps:
-                nav += [ADD] + [DOWN, SUB] * s
+            if len(steps) == 1:
+                nav = [ADD] + [DOWN, SUB] * steps[0]
+            else:
+                # многоуровневый путь (например Общие -> Подсистемы): раскрытие
+                # отдельным тиком (раскрытие узла асинхронно), затем ход + Insert
+                expand_keys = [ADD] + [DOWN, SUB] * steps[0] + [ADD]
+                nav = []
+                for s in steps[1:]:
+                    nav += [DOWN, SUB] * s
         self._focus_tree(pid, container, target)
+        if expand_keys:
+            self.bridge.call(pid, "tree_nav", {"keys": expand_keys})
+            time.sleep(0.35)  # раскрытие узла завершается между тиками
         args = self._a(container, ownerPath=owner_path or "", kind=kind,
                        noActivate=True, requireTree=True, expectClass=expect, newName=name)
         if first:
@@ -286,7 +336,17 @@ class Toolkit:
         if wizard:
             args["wizard"] = wizard
             args["modalPolicy"] = "wizard"
-        return self._call(session, "md_add_child", args, pid=pid, timeout=300.0)
+        res = self._call(session, "md_add_child", args, pid=pid, timeout=300.0)
+        if synonym and res.get("renamed") and res.get("created"):
+            new_path = (owner_path + "." if owner_path else "") \
+                + expect + "." + name
+            self._call(session, "prop_set_internal",
+                       self._a(container, path=new_path, prop="Синоним",
+                               internal=self._synonym_internal(synonym),
+                               expectId=res["created"].get("id")),
+                       pid=pid)
+            res["synonym"] = synonym
+        return res
 
     def md_delete(self, session: int | None = None, container: int | None = None,
                   path: str = "", uuid: str = "") -> dict:
@@ -483,7 +543,8 @@ _TOOLS = [
     "md_tree", "md_object", "md_children", "md_find", "module_get",
     "type_lookup", "md_counts", "md_walk",
     "module_set", "module_patch",
-    "md_set_property", "md_set_property_internal", "md_set_type", "md_set_type_internal",
+    "md_set_property", "md_set_property_internal", "md_set_synonym",
+    "md_set_type", "md_set_type_internal",
     "md_add_child", "md_delete",
     "config_open", "cfg_archive_cf", "config_save", "syntax_check", "update_db_cfg",
     "cfgstore_capture", "cfgstore_commit",

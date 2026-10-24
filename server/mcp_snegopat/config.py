@@ -34,6 +34,8 @@ class Config:
     allow_store: bool = False
     # обновление конфигурации БД
     allow_update_db: bool = False
+    # работать с сессиями на платформе вне 8.3.27 (сдвиг vtable — на свой риск)
+    allow_unverified_platform: bool = False
     # заголовки диалогов, которые update_db_cfg закрывает «ОК» (подстрока, без учёта регистра)
     update_db_allowed_dialogs: list[str] = field(
         default_factory=lambda: ["реорганизация информации", "принять"])

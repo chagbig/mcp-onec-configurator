@@ -47,27 +47,55 @@ mcp-snegopat (Python, mcp>=2.3)          server/mcp_snegopat/
 }
 ```
 
-5. Подключение к агенту (например, ZCode/Claude): stdio-команда `mcp-snegopat`.
+5. Подключение к агенту. Для ZCode — секция `mcp.servers` в `~/.zcode/cli/config.json`
+   (подключается автоматически, проверено 24.10.2026):
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "mcp-snegopat": {
+        "command": "python",
+        "args": ["-m", "mcp_snegopat"],
+        "env": {"MCP_SNEGOPAT_CONFIG": "Y:\\mcp-configurator\\mcp_snegopat.json"}
+      }
+    }
+  }
+}
+```
 
 ## Инструменты (кратко)
 
-Чтение: `list_sessions`, `session_info`, `md_tree` (пагинация), `md_object` (свойства со
-значениями, модули с хешами), `md_children`, `md_find`, `md_counts`, `md_walk`,
-`module_get`, `type_lookup`.
+Чтение: `list_sessions` (плюс признак `platformSupported`), `session_info`, `md_tree`
+(пагинация), `md_object` (свойства со значениями, модули с хешами), `md_children`,
+`md_find`, `md_counts`, `md_walk`, `module_get`, `type_lookup`.
 
 Запись (постусловия в мосте, ожидаемое состояние обязательно): `module_set`,
-`module_patch`, `md_set_property(_internal)`, `md_set_type(_internal)`, `md_add_child`,
-`md_delete`.
+`module_patch`, `md_set_property(_internal)`, `md_set_synonym` (синоним — внутренним
+представлением локализуемой строки, проверено живьём), `md_set_type(_internal)`,
+`md_add_child` (синоним можно задать сразу при создании), `md_delete`.
+
+Создание объектов: верхний уровень (Константы…Задачи) и весь узел «Общие» (Подсистемы,
+ОбщиеМодули, ПараметрыСеанса, Роли, ОбщиеРеквизиты, ПланыОбмена, КритерииОтбора,
+ПодпискиНаСобытия, РегламентныеЗадания, Боты, ФункциональныеОпции,
+ПараметрыФункциональныхОпций, ОпределяемыеТипы, ХранилищаНастроек, ОбщиеКоманды,
+ГруппыКоманд — координаты сняты автосъёмом 24.10.2026); реквизиты/ТЧ/формы/команды/макеты
+у справочников и документов; измерения/ресурсы/реквизиты регистров сведений; значения
+перечислений. ОбщиеФормы/ОбщиеМакеты открывают конструкторы — нужен `wizard`.
 
 Конфигурация: `config_open`, `cfg_archive_cf` (точка отката), `config_save` (без
-архива снимает сам; отказ без него), `syntax_check`.
-
-Хранилище и БД (по разрешениям в конфиге, **не проверены вживую**): `cfgstore_capture`,
-`cfgstore_commit`, `update_db_cfg` (только `own_bases`).
+архива снимает сам; отказ без него), `syntax_check`, `update_db_cfg` (только `own_bases`;
+проверен живьём 24.10.2026 — диалог «Реорганизация информации» закрывается разрешённым
+заголовком). Хранилище (`cfgstore_capture`/`cfgstore_commit`, по разрешению
+`allow_store`) — реализовано, вживую не проверено.
 
 Формы: `form_export` / `form_import` — внутренний текст 1С (не XML; перевод XML ↔
 внутренний текст — этап 8 плана, не сделан). Служебные: `tree_activate`,
-`tree_activate_group`, `dialog_probe`, `focus_probe`, `bridge_wait`, `bridge_stats`.
+`tree_activate_group`, `tree_nav`, `dialog_probe`, `focus_probe`, `bridge_wait`,
+`bridge_stats`.
+
+Платформа: сессии вне ветки 8.3.27 не выбираются (сдвиг vtable; обход —
+`allow_unverified_platform` в конфиге).
 
 ## Порядок работы агента
 

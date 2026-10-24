@@ -3,6 +3,7 @@
   "own_bases": [],
   "allow_store": false,
   "allow_update_db": false,
+  "allow_unverified_platform": false,
   "update_db_allowed_dialogs": ["реорганизация информации", "принять"],
   "default_timeout_s": 120,
   "long_timeout_s": 900,

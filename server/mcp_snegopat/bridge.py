@@ -57,6 +57,12 @@ def pid_alive(pid: int) -> bool:
         k32.CloseHandle(handle)
 
 
+def platform_supported(platform) -> bool:
+    """Проверенная ветка платформы — 8.3.27 (сборка Снегопата снята по её vtable;
+    на 8.3.28+ слоты сдвигаются — методы могут отдавать мусор, план §6)."""
+    return str(platform or "").startswith("8.3.27")
+
+
 def norm_eol(t: str) -> str:
     return t.replace("\r\n", "\n").replace("\r", "\n")
 
@@ -103,6 +109,7 @@ class Session:
             "pid": self.pid,
             "alive": self.alive,
             "platform": self.data.get("platform"),
+            "platformSupported": platform_supported(self.data.get("platform")),
             "conn": self.data.get("conn"),
             "containers": self.data.get("containers"),
             "running": self.running,
@@ -148,15 +155,31 @@ class Bridge:
         return [s for s in self.sessions() if s.alive]
 
     def pick_session(self, pid: int | None = None) -> int:
-        """Выбрать сессию: по pid, иначе единственная живая. Иначе отказ со списком."""
-        live = self.live_sessions()
+        """Выбрать сессию: по pid, иначе единственная живая. Иначе отказ со списком.
+
+        Сессии на непроверенной платформе (≠8.3.27) не выбираются — движение по
+        сдвинутым vtable отдаёт мусор; обход — allow_unverified_platform в конфиге.
+        """
+        live = [s for s in self.live_sessions()
+                if self.cfg.allow_unverified_platform or platform_supported(s.data.get("platform"))]
+        skipped = [s for s in self.live_sessions() if s not in live]
         if pid is not None:
             for s in live:
                 if s.pid == pid:
                     return pid
+            if any(s.pid == pid for s in skipped):
+                raise NoSessionError(
+                    f"сессия {pid} на непроверенной платформе "
+                    f"«{(next(s.data.get('platform') for s in skipped if s.pid == pid))}» — "
+                    "поддерживается только 8.3.27 (обход: allow_unverified_platform)")
             have = ", ".join(str(s.pid) for s in live) or "нет живых"
             raise NoSessionError(f"сессия {pid} не жива; живые: {have}")
         if not live:
+            if skipped:
+                raise NoSessionError(
+                    "живые сессии есть, но все на непроверенной платформе: "
+                    + ", ".join(f"{s.pid} ({s.data.get('platform')})" for s in skipped)
+                    + "; поддерживается только 8.3.27 (обход: allow_unverified_platform)")
             raise NoSessionError(
                 "нет живых сессий: конфигуратор с мостом не запущен "
                 "(нужны Снегопат starter.exe, файл включения mcp_bridge.on и открытый конфигуратор)")
