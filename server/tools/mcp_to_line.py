@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -141,6 +142,8 @@ def main() -> int:
     lf = work / "objects.txt"
     lf.write_text("\n".join(objects) + "\n", encoding="utf-8")
     dump_dir = work / "dump"
+    if dump_dir.is_dir():
+        shutil.rmtree(dump_dir)  # файлы прошлых прогонов давали ложное «ок» постусловия
     runs = [
         ("LoadCfg", ["/LoadCfg", str(cf)]),
         ("UpdateDBCfg", ["/UpdateDBCfg"]),

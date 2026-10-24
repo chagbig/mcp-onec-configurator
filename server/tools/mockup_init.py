@@ -25,8 +25,9 @@ from pathlib import Path
 PLATFORM = Path(r"C:\Program Files\1cv8\8.3.27.2074\bin\1cv8.exe")
 
 
-def run_designer(args: list[str], work: Path, name: str, timeout: float = 1800) -> bool:
-    """Один вызов DESIGNER с /DisableStartupDialogs (модалки ошибок — Л1, этап 12)."""
+def run_designer(args: list[str], work: Path, name: str, timeout: float = 7200) -> bool:
+    """Один вызов DESIGNER с /DisableStartupDialogs (модалки ошибок — Л1, этап 12).
+    Таймаут 7200: UpdateDBCfg боевого cf (~2 ГБ) идёт ~20-30 мин (скил моста)."""
     log = work / f"mockup-{name}.log"
     res = work / f"mockup-{name}.res"
     res.unlink(missing_ok=True)
