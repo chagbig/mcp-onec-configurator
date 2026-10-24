@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -39,6 +40,8 @@ GROUP_NAV: dict[str, dict[str, int | list]] = {
         "ФункциональныеОпции": [1, 11], "ПараметрыФункциональныхОпций": [1, 12],
         "ОпределяемыеТипы": [1, 13], "ХранилищаНастроек": [1, 14],
         "ОбщиеКоманды": [1, 15], "ГруппыКоманд": [1, 16],
+        # 17-18: Insert открывает конструктор — закрывает мастер-раннер (флаг-файл)
+        "ОбщиеФормы": [1, 17], "ОбщиеМакеты": [1, 18],
     },
     "Справочник": {"Реквизиты": 1, "ТабличныеЧасти": 2, "Формы": 3, "Команды": 4, "Макеты": 5},
     "Документ": {"Реквизиты": 1, "ТабличныеЧасти": 2, "Формы": 3, "Команды": 4, "Макеты": 5},
@@ -58,6 +61,7 @@ SINGULAR: dict[str, str] = {
     "РегистрыБухгалтерии": "РегистрБухгалтерии", "РегистрыРасчета": "РегистрРасчета",
     "ЖурналыДокументов": "ЖурналДокументов", "БизнесПроцессы": "БизнесПроцесс",
     "Задачи": "Задача", "Роли": "Роль", "ОбщиеФормы": "ОбщаяФорма",
+    "ОбщиеМакеты": "ОбщийМакет",
     "ПараметрыСеанса": "ПараметрСеанса", "ОбщиеРеквизиты": "ОбщийРеквизит",
     "КритерииОтбора": "КритерийОтбора", "ПодпискиНаСобытия": "ПодпискаНаСобытие",
     "РегламентныеЗадания": "РегламентноеЗадание", "Боты": "Бот",
@@ -66,6 +70,19 @@ SINGULAR: dict[str, str] = {
     "ОпределяемыеТипы": "ОпределяемыйТип", "ХранилищаНастроек": "ХранилищеНастроек",
     "ОбщиеКоманды": "ОбщаяКоманда", "ГруппыКоманд": "ГруппаКоманд",
     "ПланыОбмена": "ПланОбмена", "Последовательности": "Последовательность",
+}
+
+# Виды, у которых Insert открывает конструктор: имя задаётся в конструкторе,
+# который закрывает мастер-раннер моста (флаг-файл mcp_stg_wizard.json в root).
+# Только ОбщиеФормы: у макетного конструктора «ОК» открывает редактор макета, и
+# клик не возвращается — поток повисал (24.10.2026); макеты не автоматизированы.
+CONSTRUCTOR_KINDS: dict[str, str] = {
+    "ОбщиеФормы": "Конструктор общих форм",
+}
+CONSTRUCTOR_BLOCKED: dict[str, str] = {
+    "ОбщиеМакеты": ("конструктор макета не автоматизирован: его «ОК» открывает редактор "
+                    "макета и вешает автоматизацию (24.10.2026); создайте макет в "
+                    "конфигураторе вручную или в XML-контуре"),
 }
 
 INSTRUCTIONS = """\
@@ -278,9 +295,17 @@ class Toolkit:
         По умолчанию навигация к узлу группы по классу владельца (снимок этапа 7);
         sibling="ИмяСоседа" — вставка рядом с существующим; nav_keys — вручную (VK_коды).
         Для форм wizard задает шаги конструктора: {caption, steps:[{click/set}], click:"ОК"}.
-        Ответ: created {id, name, cls}, renamed, stray (чужие объекты — удалить вручную)."""
+        ОбщиеФормы/ОбщиеМакеты создаются через конструктор автоматически (мастер-раннер
+        моста закрывает его по флаг-файлу; имя и комментарий задаются в конструкторе).
+        Ответ: created {id, name, cls}, renamed, stray (чужие объекты — удалить вручную).
+        ОГРАНИЧЕНИЕ (24.10.2026): на конфигурации, привязанной к хранилищу, клавиатурные
+        Insert/Delete в дереве не срабатывают (проверено: sibling, навигация, после
+        захвата) — создание/удаление объектов делайте на непривязанной базе; правки
+        свойств и модулей под хранилищем работают (после захвата)."""
         if not kind or not name:
             raise BridgeError("bad_args", "kind и name обязательны")
+        if kind in CONSTRUCTOR_BLOCKED:
+            raise BridgeError("bad_args", CONSTRUCTOR_BLOCKED[kind])
         expect = SINGULAR.get(kind)
         if not expect:
             raise BridgeError("bad_args",
@@ -331,11 +356,34 @@ class Toolkit:
                 args["navKeys"] = nav
         else:
             args["sibling"] = sibling
-        if comment:
+        if comment and kind not in CONSTRUCTOR_KINDS:
             args["comment"] = comment
         if wizard:
             args["wizard"] = wizard
             args["modalPolicy"] = "wizard"
+        if kind in CONSTRUCTOR_KINDS:
+            # Insert открывает конструктор; его закрывает мастер-раннер моста.
+            # Клик из тика внутри конструктора вешает поток — только leave+флаг-файл.
+            self._set_wizard_dialog(
+                CONSTRUCTOR_KINDS[kind],
+                [{"set": self._constructor_fields(kind, name, comment),
+                  "report": list(self._constructor_fields(kind, name, comment))},
+                 {"click": "OK"}])
+            args["modalPolicy"] = "leave"
+            self._call(session, "md_add_child", args, pid=pid, timeout=120.0)
+            res = self._wait_constructor_child(pid, container, owner_path or "", kind,
+                                               expect, name)
+            if synonym and res.get("created"):
+                self._call(session, "prop_set_internal",
+                           self._a(container,
+                                   path=(owner_path + "." if owner_path else "")
+                                   + expect + "." + name,
+                                   prop="Синоним",
+                                   internal=self._synonym_internal(synonym),
+                                   expectId=res["created"].get("id")),
+                           pid=pid)
+                res["synonym"] = synonym
+            return res
         res = self._call(session, "md_add_child", args, pid=pid, timeout=300.0)
         if synonym and res.get("renamed") and res.get("created"):
             new_path = (owner_path + "." if owner_path else "") \
@@ -508,11 +556,55 @@ class Toolkit:
             pid = self._pid(session)
         return self.bridge.call(pid, op, args, timeout=timeout)
 
+    # ---------- конструкторные виды (ОбщиеФормы/ОбщиеМакеты) ----------
+
+    @staticmethod
+    def _constructor_fields(kind: str, name: str, comment: str | None) -> dict:
+        """Поля конструктора, снятые дампером модалей 24.10.2026 (Ident в обоих)."""
+        fields: dict = {"Ident": name}
+        if comment:
+            fields["Comment"] = comment
+        return fields
+
+    def _set_wizard_dialog(self, caption: str, steps: list[dict]) -> None:
+        """Прописать диалог в флаг-файл мастер-раннера (мост перечитывает его
+        на каждом модальном окне)."""
+        flag = Path(self.cfg.root) / "mcp_stg_wizard.json"
+        data: dict = {"dialogs": []}
+        if flag.is_file():
+            try:
+                data = json.loads(flag.read_text(encoding="utf-8-sig"))
+            except (OSError, json.JSONDecodeError):
+                data = {"dialogs": []}
+        dialogs = [d for d in data.get("dialogs", []) if d.get("caption") != caption]
+        dialogs.append({"caption": caption, "steps": steps})
+        flag.write_text(json.dumps({"dialogs": dialogs}, ensure_ascii=False, indent=1),
+                        encoding="utf-8")
+
+    def _wait_constructor_child(self, pid: int, container: int | None,
+                                 owner_path: str, kind: str, expect: str,
+                                 name: str, timeout_s: float = 15.0) -> dict:
+        """Дождаться объекта, созданного конструктором (мастер-раннер закрывает его
+        из простоя), и вернуть ответ в формате md_add_child."""
+        base_path = (owner_path + "." if owner_path else "") + expect + "." + name
+        deadline = time.time() + timeout_s
+        last_err: Exception | None = None
+        while time.time() < deadline:
+            try:
+                obj = self._call(pid, "md_object", self._a(container, path=base_path),
+                                 pid=pid)
+                if obj.get("cls") == expect:
+                    return {"created": {"id": obj["id"], "name": obj["name"],
+                                        "cls": obj["cls"]},
+                            "renamed": True, "stray": [], "via": "wizard-flag"}
+            except BridgeError as e:
+                last_err = e
+            time.sleep(0.4)
+        raise BridgeError("constructor_timeout",
+                          f"конструктор не создал {expect}.{name} за {timeout_s:.0f} с"
+                          + (f"; последняя ошибка: {last_err}" if last_err else ""))
+
     def _focus_tree(self, pid: int, container: int | None, path: str | None) -> None:
-        """Выделение в дереве и фокус ввода — ОТДЕЛЬНЫМИ тиками перед нажатием
-        (ловушки этапа 7: фокус дерева приходит не сразу; эффект активации окна
-        доходит очередью сообщений только после тика).
-        """
         from . import winutils
         winutils.activate_window(pid, wait_s=1.0)  # best-effort снаружи
         title = None

@@ -162,7 +162,8 @@ var CLASS_PLURAL = {
     "функциональнаяопция": "ФункциональныеОпции",
     "параметрфункциональныхопций": "ПараметрыФункциональныхОпций",
     "определяемыйтип": "ОпределяемыеТипы", "хранилищенастроек": "ХранилищаНастроек",
-    "общаякоманда": "ОбщиеКоманды", "группакоманд": "ГруппыКоманд"
+    "общаякоманда": "ОбщиеКоманды", "группакоманд": "ГруппыКоманд",
+    "общаяформа": "ОбщиеФормы", "общиймакет": "ОбщиеМакеты"
 };
 
 function container(idx) {
@@ -775,7 +776,11 @@ function onAddModal(d) {
         var ev = { stage: d.stage, caption: safeStr(d.caption) };
         if (d.stage == 1) {
             var wz = addCapture.wizard;
-            if (addCapture.modalPolicy == "wizard" && wz && wz.caption == String(d.caption)) {
+            if (addCapture.modalPolicy == "leave") {
+                // не трогаем диалог: его закроет стоящий мастер-раннер (флаг-файл)
+                // — клик из тика внутри конструктора вешал поток (24.10.2026)
+                ev.action = "оставлен мастер-раннеру";
+            } else if (addCapture.modalPolicy == "wizard" && wz && wz.caption == String(d.caption)) {
                 ev.set = [];
                 var steps = wz.steps || [];
                 for (var si = 0; si < steps.length; si++) {
