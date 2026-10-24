@@ -1,0 +1,79 @@
+{
+ "log": [
+  "activate Справочник._ДемоКонтрагенты.Реквизит.Партнер try0: Конфигурация <!>",
+  "activate Справочник._ДемоКонтрагенты.Реквизит.Партнер try0: Конфигурация * <!>",
+  "activate Справочник._ДемоКонтрагенты try0: Конфигурация * <!>",
+  "activate Справочник._ДемоКонтрагенты.Реквизит.Партнер try0: Конфигурация * <!>",
+  "activate Справочник._ДемоКонтрагенты.Реквизит.МсрНаУдаление try0: Конфигурация * <!>"
+ ],
+ "open": "Основная конфигурация",
+ "a1": {
+  "ok": true,
+  "err": null,
+  "before": 9,
+  "after": 10,
+  "id": "{3A47EFBA-84EF-4A74-A63A-C573FC795114}",
+  "renamed": true,
+  "ms": 180
+ },
+ "a1_type": {
+  "internal": "{\"#\",f5c65050-3bbb-11d5-b988-0050bae0a95d,\n{\"Pattern\",\n{\"S\",50,1}\n}\n}"
+ },
+ "a2": {
+  "ok": true,
+  "err": null,
+  "before": 10,
+  "after": 11,
+  "id": "{CC39D7BF-2906-4239-9ACC-23BC7C992EDC}",
+  "renamed": true,
+  "ms": 94
+ },
+ "a2_type": {
+  "internal": "{\"#\",f5c65050-3bbb-11d5-b988-0050bae0a95d,\n{\"Pattern\",\n{\"N\",15,2,0}\n}\n}"
+ },
+ "cat": {
+  "ok": true,
+  "err": null,
+  "before": 112,
+  "after": 113,
+  "id": "{676FBB49-C247-4516-B74E-43D0597A20EE}",
+  "renamed": true,
+  "ms": 134
+ },
+ "a3": {
+  "ok": true,
+  "err": null,
+  "before": 11,
+  "after": 12,
+  "id": "{1D3C3A21-1FC5-45BF-9D95-982BD31A8C06}",
+  "renamed": true,
+  "ms": 98
+ },
+ "del": {
+  "ok": true,
+  "err": null,
+  "stillPresent": false
+ },
+ "edit_s": 3.2,
+ "archive": {
+  "ok": true,
+  "ms": 2074,
+  "file": "Y:\\Snegopat-mcp\\backups\\demossl-st7-r1-before-save.cf"
+ },
+ "save": {
+  "ok": false,
+  "ms": 162,
+  "boxes": [
+   {
+    "caption": "",
+    "text": "Обнаружены возможные ошибки в конфигурации. Продолжить?",
+    "type": 4,
+    "action": "Нет"
+   }
+  ],
+  "messages": [
+   "Справочник.МсрТестовыйСправочник: Объект не включен ни в одну подсистему, отображаемую в командном интерфейсе"
+  ]
+ },
+ "total_s": 5.6
+}

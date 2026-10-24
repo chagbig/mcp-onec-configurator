@@ -1,0 +1,41 @@
+{
+ "id": "20261017001446-a3dc3bd2",
+ "ok": true,
+ "tick": 45,
+ "result": {
+  "sent": true,
+  "method": "key",
+  "hwnd": 83106936,
+  "before": 9,
+  "after": 10,
+  "events": [
+   {
+    "request": true,
+    "id": "{B3F36AFD-457E-40AB-B7DA-19B0700856CE}",
+    "name": "Реквизит1",
+    "cls": "Реквизит",
+    "parentId": "{28E59C50-3315-4759-98CC-24ACE88CC4CF}"
+   },
+   {
+    "request": false,
+    "id": "{B3F36AFD-457E-40AB-B7DA-19B0700856CE}",
+    "name": "Реквизит1",
+    "cls": "Реквизит",
+    "parentId": "{28E59C50-3315-4759-98CC-24ACE88CC4CF}"
+   }
+  ],
+  "created": {
+   "request": false,
+   "id": "{B3F36AFD-457E-40AB-B7DA-19B0700856CE}",
+   "name": "Реквизит1",
+   "cls": "Реквизит",
+   "parentId": "{28E59C50-3315-4759-98CC-24ACE88CC4CF}"
+  },
+  "foundById": true,
+  "renameResult": true,
+  "renamed": true,
+  "comment": "mcp: этап 7"
+ },
+ "ms": 139,
+ "_wall_ms": 186
+}

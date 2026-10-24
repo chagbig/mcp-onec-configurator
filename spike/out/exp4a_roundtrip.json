@@ -1,0 +1,48 @@
+{
+ "open": "Основная конфигурация",
+ "saveA": {
+  "id": "20261016233005-e8fa1e37",
+  "ok": true,
+  "tick": 56,
+  "result": {
+   "file": "Y:\\Snegopat-mcp\\mcp\\forms\\kontr_elem_A.bin",
+   "size": 96809,
+   "ms": 2,
+   "probe": "object: IContainedObject ICopyHelperCreator IDocument IEventRecipient IPersistableDocument ISettingsConsumer  | raw: IMDExtObj IValue "
+  },
+  "ms": 144,
+  "_wall_ms": 187
+ },
+ "loadA": {
+  "id": "20261016233005-359112e2",
+  "ok": true,
+  "tick": 57,
+  "result": {
+   "file": "Y:\\Snegopat-mcp\\mcp\\forms\\kontr_elem_A.bin",
+   "loaded": true,
+   "ms": 3,
+   "isModified": false
+  },
+  "ms": 6,
+  "_wall_ms": 42
+ },
+ "saveB": {
+  "id": "20261016233005-105d51b0",
+  "ok": true,
+  "tick": 58,
+  "result": {
+   "file": "Y:\\Snegopat-mcp\\mcp\\forms\\kontr_elem_B.bin",
+   "size": 96785,
+   "ms": 72,
+   "probe": "object: IContainedObject ICopyHelperCreator IDocument IEventRecipient IPersistableDocument ISettingsConsumer  | raw: IMDExtObj IValue "
+  },
+  "ms": 76,
+  "_wall_ms": 2295
+ },
+ "A_eq_B": false,
+ "sizes": [
+  96809,
+  96785
+ ],
+ "head": "efbbbf7b342c0d0a7b35302c302c302c302c302c312c302c302c30303030303030302d303030302d303030302d303030302d3030303030303030303030302c31"
+}

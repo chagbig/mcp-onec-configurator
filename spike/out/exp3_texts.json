@@ -1,0 +1,45 @@
+{
+ "id": "20261016232009-b30c8150",
+ "ok": true,
+ "tick": 214,
+ "result": {
+  "obj": {
+   "name": "_ДемоСтандартныеПодсистемыВызовСервера",
+   "id": "{BCE80083-D770-4BBF-8A0D-B5FB71CAB1E3}",
+   "cls": "ОбщийМодуль"
+  },
+  "prop": {
+   "hash": "1a0420ca",
+   "eol": {
+    "length": 1557,
+    "crlf": 0,
+    "lf": 35,
+    "cr": 0,
+    "endsWithEol": true,
+    "bom": false
+   }
+  },
+  "buffer": {
+   "hash": "1a0420ca",
+   "eol": {
+    "length": 1557,
+    "crlf": 0,
+    "lf": 35,
+    "cr": 0,
+    "endsWithEol": true,
+    "bom": false
+   },
+   "linesCount": 35,
+   "readOnly": true
+  },
+  "sameAsProp": true,
+  "py_hash": "1a0420ca",
+  "same_as_xml_dump": true,
+  "xml_dump_eol": {
+   "crlf": 0,
+   "len": 1557
+  }
+ },
+ "ms": 18,
+ "_wall_ms": 105
+}

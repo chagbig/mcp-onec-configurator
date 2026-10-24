@@ -1,0 +1,10 @@
+{
+  "root": "Y:\\Snegopat-mcp\\mcp",
+  "own_bases": [],
+  "allow_store": false,
+  "allow_update_db": false,
+  "update_db_allowed_dialogs": ["реорганизация информации", "принять"],
+  "default_timeout_s": 120,
+  "long_timeout_s": 900,
+  "heartbeat_stale_s": 30
+}

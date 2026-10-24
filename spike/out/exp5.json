@@ -1,0 +1,102 @@
+{
+ "config_open": {
+  "id": "20261016231941-a077d3a1",
+  "ok": true,
+  "tick": 39,
+  "result": {
+   "before": {
+    "open": {
+     "enabled": true,
+     "checked": false
+    },
+    "close": {
+     "enabled": false,
+     "checked": false
+    },
+    "save": {
+     "enabled": false,
+     "checked": false
+    }
+   },
+   "sent": true,
+   "after": {
+    "open": {
+     "enabled": false,
+     "checked": false
+    },
+    "close": {
+     "enabled": true,
+     "checked": false
+    },
+    "save": {
+     "enabled": false,
+     "checked": false
+    }
+   },
+   "currentIdentifier": "Основная конфигурация",
+   "openedCount": 2
+  },
+  "ms": 531,
+  "_wall_ms": 622
+ },
+ "session_after_open": {
+  "id": "20261016231941-21b7df2f",
+  "ok": true,
+  "tick": 40,
+  "result": {
+   "pid": 15580,
+   "conn": "File=\"Y:\\Snegopat-mcp\\bases\\demossl_mcp\";",
+   "platform": "8.3.27.2074",
+   "modalMode": 0,
+   "containers": [
+    {
+     "index": 0,
+     "identifier": "Конфигурация базы данных",
+     "isModified": false,
+     "root": "БиблиотекаСтандартныхПодсистемДемо",
+     "isCurrent": false
+    },
+    {
+     "index": 1,
+     "identifier": "Основная конфигурация",
+     "isModified": false,
+     "root": "БиблиотекаСтандартныхПодсистемДемо",
+     "isCurrent": true
+    }
+   ],
+   "stat": {
+    "ticks": 40,
+    "ticksInModal": 0,
+    "ticksBusy": 0,
+    "done": 1,
+    "errors": 0,
+    "startedAt": 1792181974855
+   }
+  },
+  "ms": 1,
+  "_wall_ms": 125
+ },
+ "probe": {
+  "id": "20261016231941-4e80068d",
+  "ok": true,
+  "tick": 41,
+  "result": {
+   "answer": -1,
+   "ms": 4139,
+   "ticksDuring": 25,
+   "ticksBusyDuring": 25,
+   "ticksInModalDuring": 0
+  },
+  "ms": 4139,
+  "_wall_ms": 4255
+ },
+ "queued_ping": {
+  "id": "20261016231942-250952d4",
+  "ok": true,
+  "tick": 67,
+  "result": "pong",
+  "ms": 1,
+  "_wall_ms": 3317
+ },
+ "queued_ping_wait_s": 3.32
+}

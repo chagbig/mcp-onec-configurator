@@ -1,0 +1,28 @@
+{
+ "open": "Основная конфигурация",
+ "form_editor": {
+  "id": "20261016232642-2c9bfe7e",
+  "ok": true,
+  "tick": 56,
+  "result": {
+   "obj": {
+    "name": "ФормаЭлемента",
+    "id": "{8C800F44-825E-47B6-A6AB-C59EDDCCBE49}",
+    "cls": "Форма"
+   },
+   "editProperty": "null",
+   "probeAfterOpen": "object: IContainedObject ICopyHelperCreator IDocument IEventRecipient IPersistableDocument ISettingsConsumer  | raw: IMDExtObj IValue ",
+   "saveToFile": "файл"
+  },
+  "ms": 128,
+  "_wall_ms": 165
+ },
+ "timer": {
+  "ticks": 57,
+  "ticksInModal": 0,
+  "ticksBusy": 0,
+  "done": 2,
+  "errors": 0,
+  "startedAt": 1792182376770
+ }
+}

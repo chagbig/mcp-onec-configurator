@@ -1,0 +1,21 @@
+{
+ "add": {
+  "ok": true,
+  "renamed": true,
+  "id": "{8B2A208A-AE94-4981-8253-18A545B1EC4A}",
+  "err": null
+ },
+ "lookup": {
+  "total": 5062,
+  "found": [
+   {
+    "name": "СправочникСсылка._ДемоКонтрагенты",
+    "clsid": "{A06DCAAF-8380-4E67-BFDC-64E13962DDEB}"
+   },
+   {
+    "name": "СправочникСсылка._ДемоКонтрагенты",
+    "clsid": "{A06DCAAF-8380-4E67-BFDC-64E13962DDEB}"
+   }
+  ]
+ }
+}

@@ -1,0 +1,44 @@
+{
+ "texts": {
+  "obj": {
+   "name": "_ДемоСтандартныеПодсистемыВызовСервера",
+   "id": "{BCE80083-D770-4BBF-8A0D-B5FB71CAB1E3}",
+   "cls": "ОбщийМодуль"
+  },
+  "prop": {
+   "hash": "d54e4911",
+   "eol": {
+    "length": 1585,
+    "crlf": 0,
+    "lf": 36,
+    "cr": 0,
+    "endsWithEol": true,
+    "bom": false
+   }
+  },
+  "buffer": {
+   "hash": "d54e4911",
+   "eol": {
+    "length": 1585,
+    "crlf": 0,
+    "lf": 36,
+    "cr": 0,
+    "endsWithEol": true,
+    "bom": false
+   },
+   "linesCount": 36,
+   "readOnly": false
+  },
+  "sameAsProp": true
+ },
+ "prop_first_line": "// human edit, ne sohraneno",
+ "orig_hash": "1a0420ca",
+ "agent_write_with_stale_hash": {
+  "ok": false,
+  "error": {
+   "code": "exception",
+   "message": "expected_hash не совпал: текущий d54e4911"
+  }
+ },
+ "after_refusal_hash": "d54e4911"
+}

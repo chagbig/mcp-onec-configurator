@@ -1,0 +1,331 @@
+{
+ "id": "20261017001218-a58a4239",
+ "ok": true,
+ "tick": 38,
+ "result": [
+  {
+   "path": "0",
+   "title": "",
+   "cls": "",
+   "id": "{F605086A-29EF-4CBF-B2EA-7D3420962077}",
+   "isContainer": 5
+  },
+  {
+   "path": "0/0",
+   "title": "",
+   "cls": "",
+   "id": "{C5CA630D-F345-4624-9EC8-846A1A056EB4}",
+   "isContainer": 5
+  },
+  {
+   "path": "0/1",
+   "title": "",
+   "cls": "",
+   "id": "{D59D1DD7-0596-4813-ACC7-BBA622C08A2B}",
+   "isContainer": 5
+  },
+  {
+   "path": "0/1/0",
+   "title": "Конфигурация <!>",
+   "cls": "",
+   "id": "{9405B95B-3626-4B18-BA92-80BFDD4B9779}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/2",
+   "title": "",
+   "cls": "",
+   "id": "{B8C142CC-1DA2-42B9-B131-3F57E2341E42}",
+   "isContainer": 5
+  },
+  {
+   "path": "0/3",
+   "title": "",
+   "cls": "",
+   "id": "{4483E843-110A-4798-9339-B22C1967FA9F}",
+   "isContainer": 5
+  },
+  {
+   "path": "0/4",
+   "title": "",
+   "cls": "",
+   "id": "{AC3C29DB-BED6-4E03-944C-549FC46644BD}",
+   "isContainer": 5
+  },
+  {
+   "path": "0/5",
+   "title": "",
+   "cls": "",
+   "id": "{35AAFD99-B9E8-4EDB-B697-F67386E306E3}",
+   "isContainer": 5
+  },
+  {
+   "path": "0/6",
+   "title": "",
+   "cls": "",
+   "id": "{475CD7C8-730E-492C-8334-9A494DD72A63}",
+   "isContainer": 5
+  },
+  {
+   "path": "0/7",
+   "title": "",
+   "cls": "",
+   "id": "{0AEE2227-B1FC-4D27-B190-A2216E695EF3}",
+   "isContainer": 5
+  },
+  {
+   "path": "0/8",
+   "title": "",
+   "cls": "",
+   "id": "{3FE815AB-F2A7-4E48-9A76-03D642B5D5D6}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/9",
+   "title": "",
+   "cls": "",
+   "id": "{C2F012EE-FE32-4A1B-AA43-10AEDC5B016E}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/10",
+   "title": "",
+   "cls": "",
+   "id": "{B9BE9D85-09AD-46E9-A1C6-158E8CCB20B5}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/11",
+   "title": "",
+   "cls": "",
+   "id": "{096AA16C-D1B3-478D-8680-9D6A54A959BB}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/12",
+   "title": "",
+   "cls": "",
+   "id": "{51B125D5-FF35-4897-BF45-1820B5A96033}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/13",
+   "title": "",
+   "cls": "",
+   "id": "{C51F975D-D835-420A-AD80-C189CABA3179}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/14",
+   "title": "",
+   "cls": "",
+   "id": "{B8D4786A-159D-45AF-A781-80FA77F62D39}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/15",
+   "title": "Редактирование табличного документа",
+   "cls": "",
+   "id": "{528D4683-D3A5-4676-8364-215C8AF82090}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/16",
+   "title": "",
+   "cls": "",
+   "id": "{5BB819E8-3A1B-4706-BC93-8D68D6D86523}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/17",
+   "title": "",
+   "cls": "",
+   "id": "{6DE03EDF-CD0D-4A7B-AAB3-94B9AA0EDEB8}",
+   "isContainer": 5
+  },
+  {
+   "path": "0/18",
+   "title": "",
+   "cls": "",
+   "id": "{A2D095BD-F756-465F-9EE6-762AFE144C70}",
+   "isContainer": 5
+  },
+  {
+   "path": "0/19",
+   "title": "",
+   "cls": "",
+   "id": "{2930CA85-3500-49B9-A3D9-D1FC79184471}",
+   "isContainer": 5
+  },
+  {
+   "path": "0/19/0",
+   "title": "Поле HTML документа",
+   "cls": "",
+   "id": "{6C11B6B2-3E87-4F7E-B8FD-16AB46CFDF08}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/19/1",
+   "title": "Табличный документ",
+   "cls": "",
+   "id": "{37862F42-90A8-450A-9AAB-1BD199B863BB}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/19/2",
+   "title": "Элементы управления",
+   "cls": "",
+   "id": "{F6FDCCD8-767A-41E0-9086-BFCFA4F816A9}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/19/3",
+   "title": "Текст",
+   "cls": "",
+   "id": "{357A702F-FDC7-4429-AE2B-D708BBBD1A2A}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/19/4",
+   "title": "Вставка элементов схемы",
+   "cls": "",
+   "id": "{306ECB58-C96D-4BF7-96BA-A53630FB5269}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/19/5",
+   "title": "Выравнивание",
+   "cls": "",
+   "id": "{78EDE97B-4696-45F4-8565-F88C33DA6B52}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/20",
+   "title": "",
+   "cls": "",
+   "id": "{13C61C44-CB8F-465A-A1D5-134CCEAF644A}",
+   "isContainer": 5
+  },
+  {
+   "path": "0/20/0",
+   "title": "Точки останова",
+   "cls": "",
+   "id": "{23DF42B7-E30D-41F0-8FBE-494F68BC8FC5}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/20/1",
+   "title": "Модуль",
+   "cls": "",
+   "id": "{6FEDB648-5124-486D-B12F-076514F06DB8}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/20/2",
+   "title": "Форматирование",
+   "cls": "",
+   "id": "{07A7B24F-7E6D-4AFC-9731-6ABCB2AA0D04}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/20/3",
+   "title": "Примечания",
+   "cls": "",
+   "id": "{75629F71-F2CC-4176-8528-8DD673C24B91}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/20/4",
+   "title": "Редактирование HTML",
+   "cls": "",
+   "id": "{BB693210-D845-4BD0-A8AC-9A4BC82C04A1}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/20/5",
+   "title": "Имена",
+   "cls": "",
+   "id": "{53C7E569-37A5-4984-BA8C-838A7C9FFB5F}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/20/6",
+   "title": "Редактор форм",
+   "cls": "",
+   "id": "{5309869B-F134-4ACA-A7D9-DB9E83A30B01}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/20/7",
+   "title": "Текстовый макет",
+   "cls": "",
+   "id": "{AAE1A5CC-D0EB-4FFF-BD7B-F3D5FC95978E}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/20/8",
+   "title": "Конфигурация",
+   "cls": "",
+   "id": "{7F658557-1E8E-413F-AEA2-87349EB111F0}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/20/9",
+   "title": "Предметы отладки",
+   "cls": "",
+   "id": "{56D060B0-A049-475F-AA73-01CE1CB23060}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/20/10",
+   "title": "Отладка конфигурации",
+   "cls": "",
+   "id": "{D2C878CC-9D94-4F94-B364-D7A6EE37D436}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/20/11",
+   "title": "Хранилище конфигурации",
+   "cls": "",
+   "id": "{5D6CAA62-10E2-4DB9-85C0-FF60CD0D57FC}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/20/12",
+   "title": "Стандартная",
+   "cls": "",
+   "id": "{0A171CCA-E42F-4242-8E60-BA73C6D9CB7A}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/20/13",
+   "title": "Главное меню",
+   "cls": "",
+   "id": "{F10CBB80-F679-11D4-9DD3-0050BAE2BC79}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/21",
+   "title": "Панель окон",
+   "cls": "",
+   "id": "{6B811EC1-3FCD-42FD-BC05-25055A281A13}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/22",
+   "title": "Панель состояния",
+   "cls": "",
+   "id": "{51BB52E0-1886-11D5-BF4C-0050BAE2BC79}",
+   "isContainer": 0
+  },
+  {
+   "path": "0/23",
+   "title": "",
+   "cls": "",
+   "id": "{33ECE94C-5FB9-4540-9B97-C874FD45AE08}",
+   "isContainer": 4
+  }
+ ],
+ "ms": 7,
+ "_wall_ms": 42
+}

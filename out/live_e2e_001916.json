@@ -1,0 +1,120 @@
+{
+ "steps": [
+  {
+   "step": "list_sessions",
+   "ok": true,
+   "ms": 0
+  },
+  {
+   "step": "session_info",
+   "ok": true,
+   "ms": 126
+  },
+  {
+   "step": "config_open",
+   "ok": true,
+   "ms": 148
+  },
+  {
+   "step": "session_info_after_open",
+   "ok": true,
+   "ms": 169
+  },
+  {
+   "step": "md_counts",
+   "ok": true,
+   "ms": 148
+  },
+  {
+   "step": "md_tree_root",
+   "ok": true,
+   "ms": 147
+  },
+  {
+   "step": "md_walk",
+   "ok": true,
+   "ms": 169
+  },
+  {
+   "step": "md_add_child: справочник",
+   "ok": false,
+   "ms": 671,
+   "error": "BridgeError: нет фокуса ввода: активируйте окно конфигуратора (сервер делает это перед операциями дерева)",
+   "where": {
+    "op": "md_add_child",
+    "ownerPath": ""
+   }
+  },
+  {
+   "step": "md_object: справочник",
+   "ok": false,
+   "ms": 106,
+   "error": "BridgeError: не найден Справочник.МсрЭ2Э",
+   "where": {
+    "op": "md_object",
+    "path": "Справочник.МсрЭ2Э"
+   }
+  },
+  {
+   "step": "md_add_child: реквизит",
+   "ok": false,
+   "ms": 148,
+   "error": "BridgeError: не найден Справочник.МсрЭ2Э",
+   "where": {
+    "op": "md_object",
+    "path": "Справочник.МсрЭ2Э"
+   }
+  },
+  {
+   "step": "syntax_check",
+   "ok": true,
+   "ms": 252
+  },
+  {
+   "step": "config_save (автоархив)",
+   "ok": false,
+   "ms": 212,
+   "error": "BridgeError: команда «Сохранить конфигурацию» недоступна (isModified=false)",
+   "where": {
+    "op": "config_save"
+   }
+  },
+  {
+   "step": "raw: идемпотентность по id",
+   "ok": true,
+   "replayed": [
+    1,
+    2
+   ],
+   "done": [
+    48,
+    49
+   ]
+  },
+  {
+   "step": "raw: 6 битых запросов -> мост жив",
+   "ok": true
+  },
+  {
+   "step": "raw: deadline",
+   "ok": true
+  },
+  {
+   "step": "raw: unknown_op",
+   "ok": true
+  },
+  {
+   "step": "bridge_stats",
+   "ok": true,
+   "ms": 145
+  }
+ ],
+ "failures": [
+  "md_add_child: справочник",
+  "md_object: справочник",
+  "md_add_child: реквизит",
+  "config_save (автоархив)"
+ ],
+ "pid": 23992,
+ "modules_of_catalog": "нет свойств-модулей — пропуск module_*"
+}

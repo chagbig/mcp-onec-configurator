@@ -1,0 +1,17 @@
+{
+ "id": "20261017001228-cac627ea",
+ "ok": true,
+ "tick": 105,
+ "result": {
+  "view": {
+   "path": "0/1/0",
+   "title": "Конфигурация <!>",
+   "cls": "",
+   "id": "{9405B95B-3626-4B18-BA92-80BFDD4B9779}",
+   "isContainer": 0
+  },
+  "found": []
+ },
+ "ms": 6,
+ "_wall_ms": 145
+}

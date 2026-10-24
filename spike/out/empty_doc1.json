@@ -1,0 +1,48 @@
+{
+ "a1": {
+  "ok": true,
+  "err": null,
+  "before": 0,
+  "after": 1,
+  "id": "{917FD43A-1336-416F-99DC-B63B5CFB9C4A}",
+  "renamed": true,
+  "classMismatch": null,
+  "wrong": null,
+  "stray": [],
+  "ms": 166
+ },
+ "ref_guid": "51163157-e007-43f7-9a7e-8278962aa7ff",
+ "a1_type": true,
+ "a2": {
+  "ok": true,
+  "err": null,
+  "before": 1,
+  "after": 2,
+  "id": "{3E7A0C09-848F-469E-8207-83F43FB45572}",
+  "renamed": true,
+  "classMismatch": null,
+  "wrong": null,
+  "stray": [],
+  "ms": 127
+ },
+ "a2_type": {
+  "internal": "{\"#\",f5c65050-3bbb-11d5-b988-0050bae0a95d,\n{\"Pattern\",\n{\"N\",15,2,0}\n}\n}"
+ },
+ "ts": {
+  "ok": true,
+  "err": null,
+  "before": 0,
+  "after": 1,
+  "id": "{64899CF7-1086-446E-A44E-53F23342B46E}",
+  "renamed": true,
+  "classMismatch": null,
+  "wrong": null,
+  "stray": [],
+  "ms": 97
+ },
+ "log": [
+  "activate «Документ.МсрДокумент» try0: Конфигурация *",
+  "activate «Документ.МсрДокумент.Реквизит.МсрКонтрагент» try0: Конфигурация *",
+  "activate «Документ.МсрДокумент» try0: Конфигурация *"
+ ]
+}

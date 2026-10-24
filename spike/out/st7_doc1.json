@@ -1,0 +1,20 @@
+{
+ "sibling": "_ДемоЗаказПокупателя",
+ "docs_before": 25,
+ "doc": {
+  "ok": true,
+  "err": null,
+  "after": 26,
+  "created": {
+   "request": false,
+   "id": "{944235E3-DFE8-48EF-9AD6-90CD9C8E632C}",
+   "name": "Документ1",
+   "cls": "Документ",
+   "parentId": "{66193438-ABC5-410B-A1F1-A204102D1A62}"
+  },
+  "renamed": true,
+  "stray": [],
+  "ms": 155
+ },
+ "av": "Конфигурация * <!>"
+}

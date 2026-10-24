@@ -1,0 +1,88 @@
+{
+ "open": "Основная конфигурация",
+ "orig_is_current": true,
+ "edit": true,
+ "save_without_archive": {
+  "code": "exception",
+  "message": "нет проверенного архива cf перед сохранением: "
+ },
+ "archB": {
+  "file": "Y:\\Snegopat-mcp\\backups\\demossl-B-saved-state.cf",
+  "sent": true,
+  "ms": 3781,
+  "pathUsed": true,
+  "selectEvents": [
+   {
+    "mode": 1,
+    "defExt": "",
+    "title": "",
+    "initial": "1Cv8.cf",
+    "action": "подставлен путь"
+   }
+  ],
+  "msgBoxes": [
+   {
+    "caption": "",
+    "text": "Конфигурация 'Демонстрационная конфигурация \"Библиотека стандартных подсистем\", редакция 3.1' была изменена. Сохранить изменения?",
+    "type": 51,
+    "action": "Нет"
+   },
+   {
+    "caption": "",
+    "text": "Сохранение конфигурации в файл Y:\\Snegopat-mcp\\backups\\demossl-B-saved-state.cf завершено.",
+    "type": 64,
+    "action": "ОК"
+   }
+  ],
+  "errors": [],
+  "exists": true,
+  "size": 90808819,
+  "ok": true
+ },
+ "save": {
+  "id": "20261016235219-fc1704a3",
+  "ok": true,
+  "tick": 75,
+  "result": {
+   "sent": true,
+   "ms": 456,
+   "isModifiedBefore": true,
+   "isModifiedAfter": false,
+   "msgBoxes": [],
+   "errors": [],
+   "ok": true,
+   "archive": "Y:\\Snegopat-mcp\\backups\\demossl-B-saved-state.cf"
+  },
+  "ms": 472,
+  "_wall_ms": 515
+ },
+ "archC": {
+  "file": "Y:\\Snegopat-mcp\\backups\\demossl-C-after-save.cf",
+  "sent": true,
+  "ms": 2734,
+  "pathUsed": true,
+  "selectEvents": [
+   {
+    "mode": 1,
+    "defExt": "",
+    "title": "",
+    "initial": "1Cv8.cf",
+    "action": "подставлен путь"
+   }
+  ],
+  "msgBoxes": [
+   {
+    "caption": "",
+    "text": "Сохранение конфигурации в файл Y:\\Snegopat-mcp\\backups\\demossl-C-after-save.cf завершено.",
+    "type": 64,
+    "action": "ОК"
+   }
+  ],
+  "errors": [],
+  "exists": true,
+  "size": 90808867,
+  "ok": true
+ },
+ "archB_sig": "ffffff7f",
+ "archC_sig": "ffffff7f"
+}

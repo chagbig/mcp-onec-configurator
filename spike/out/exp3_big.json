@@ -1,0 +1,46 @@
+{
+ "ОбменДаннымиСервер": {
+  "lines": 14635,
+  "chars": 587386,
+  "prop_eq_dump": true,
+  "open_ms": 352,
+  "write": {
+   "ok": true,
+   "err": null,
+   "ms": 92,
+   "total_ms": 550,
+   "wall_ms": 603,
+   "bufferMatch": true,
+   "propMatch": true
+  },
+  "restore": {
+   "ok": true,
+   "err": null,
+   "ms": 24,
+   "total_ms": 482,
+   "propMatch": true
+  }
+ },
+ "УправлениеДоступомСлужебный": {
+  "lines": 45861,
+  "chars": 1842190,
+  "prop_eq_dump": true,
+  "open_ms": 935,
+  "write": {
+   "ok": true,
+   "err": null,
+   "ms": 220,
+   "total_ms": 1918,
+   "wall_ms": 2010,
+   "bufferMatch": true,
+   "propMatch": true
+  },
+  "restore": {
+   "ok": true,
+   "err": null,
+   "ms": 41,
+   "total_ms": 1729,
+   "propMatch": true
+  }
+ }
+}

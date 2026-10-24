@@ -1,0 +1,35 @@
+{
+ "cat": {
+  "ok": true,
+  "err": null,
+  "before": 0,
+  "after": 1,
+  "id": "{CFE2FB2A-6536-4787-9114-59B5794361EE}",
+  "renamed": true,
+  "classMismatch": null,
+  "wrong": null,
+  "stray": [],
+  "ms": 107
+ },
+ "doc": {
+  "ok": true,
+  "err": null,
+  "before": 0,
+  "after": 1,
+  "id": "{E1FB13DF-1265-4634-8A27-6C9FA11D944C}",
+  "renamed": true,
+  "classMismatch": null,
+  "wrong": null,
+  "stray": [],
+  "ms": 165
+ },
+ "counts": {
+  "Языки": 1,
+  "Справочники": 1,
+  "Документы": 1
+ },
+ "log": [
+  "activate «» try0: Конфигурация",
+  "activate «» try0: Конфигурация *"
+ ]
+}

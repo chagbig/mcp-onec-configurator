@@ -1,0 +1,35 @@
+{
+ "dim_type": true,
+ "res_type": {
+  "internal": "{\"#\",f5c65050-3bbb-11d5-b988-0050bae0a95d,\n{\"Pattern\",\n{\"N\",15,2,0}\n}\n}"
+ },
+ "rename_check": {
+  "ok": true,
+  "match": true,
+  "err": null
+ },
+ "sub": {
+  "ok": true,
+  "err": null,
+  "before": 0,
+  "after": 1,
+  "id": "{9459F9C1-305C-48C6-81D8-0A545B11E356}",
+  "renamed": true,
+  "classMismatch": null,
+  "wrong": null,
+  "stray": [],
+  "ms": 62
+ },
+ "sostav": {
+  "obj": {
+   "name": "МсрПодсистема",
+   "id": "{9459F9C1-305C-48C6-81D8-0A545B11E356}",
+   "cls": "Подсистема"
+  },
+  "type": "object",
+  "value": "?Объект не поддерживает это свойство или метод"
+ },
+ "log": [
+  "activate «» try0: Конфигурация * <!>"
+ ]
+}

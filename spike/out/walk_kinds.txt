@@ -1,0 +1,9 @@
+Configuration: мост 1, xml 0
+Dimension: мост 521, xml 519
+{http://v8.1c.ru/8.2/managed-application/core}left: мост 0, xml 1
+{http://v8.1c.ru/8.3/xcf/extrnprops}CommandsVisibility: мост 0, xml 1
+{http://v8.1c.ru/8.3/xcf/extrnprops}Page: мост 0, xml 1
+{http://v8.1c.ru/8.3/xcf/extrnprops}Picture: мост 0, xml 2
+{http://v8.1c.ru/8.3/xcf/extrnprops}SubsystemsOrder: мост 0, xml 1
+{http://v8.1c.ru/8.3/xcf/extrnprops}WorkingAreaTemplate: мост 0, xml 1
+{"Configuration": 1, "Language": 1, "Subsystem": 239, "StyleItem": 117, "CommonPicture": 579, "SessionParameter": 64, "Role": 157, "CommonTemplate": 23, "FilterCriterion": 1, "CommonModule": 761, "CommonAttribute": 7, "ExchangePlan": 6, "Attribute": 3047, "TabularSection": 186, "Form": 940, "Template": 190, "XDTOPackage": 59, "WebService": 13, "Operation": 143, "Parameter": 392, "HTTPService": 2, "URLTemplate": 9, "Method": 12, "EventSubscription": 149, "ScheduledJob": 71, "SettingsStorage": 1, "FunctionalOption": 106, "FunctionalOptionsParameter": 5, "DefinedType": 73, "CommonCommand": 94, "CommandGroup": 7, "Constant": 237, "CommonForm": 119, "Catalog": 112, "Command": 147, "Document": 25, "Sequence": 1, "Dimension": 521, "DocumentJournal": 4, "Column": 27, "Enum": 120, "EnumValue": 512, "Report": 52, "DataProcessor": 145, "InformationRegister": 253, "Resource": 722, "AccumulationRegister": 2, "ChartOfCharacteristicTypes": 5, "ChartOfAccounts": 1, "AccountingFlag": 2, "ExtDimensionAccountingFlag": 3, "AccountingRegister": 2, "ChartOfCalculationTypes": 1, "CalculationRegister": 1, "Recalculation": 1, "BusinessProcess": 2, "Task": 1, "AddressingAttribute": 4}

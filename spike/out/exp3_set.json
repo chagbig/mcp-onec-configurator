@@ -1,0 +1,124 @@
+{
+ "neg": {
+  "id": "20261016232131-22d13f24",
+  "ok": false,
+  "tick": 96,
+  "error": {
+   "code": "exception",
+   "message": "expected_hash не совпал: текущий 1a0420ca"
+  },
+  "ms": 3,
+  "_wall_ms": 41
+ },
+ "after_neg": {
+  "id": "20261016232131-1341c7f8",
+  "ok": true,
+  "tick": 97,
+  "result": {
+   "obj": {
+    "name": "_ДемоСтандартныеПодсистемыВызовСервера",
+    "id": "{BCE80083-D770-4BBF-8A0D-B5FB71CAB1E3}",
+    "cls": "ОбщийМодуль"
+   },
+   "prop": {
+    "hash": "1a0420ca",
+    "eol": {
+     "length": 1557,
+     "crlf": 0,
+     "lf": 35,
+     "cr": 0,
+     "endsWithEol": true,
+     "bom": false
+    }
+   },
+   "buffer": {
+    "hash": "1a0420ca",
+    "eol": {
+     "length": 1557,
+     "crlf": 0,
+     "lf": 35,
+     "cr": 0,
+     "endsWithEol": true,
+     "bom": false
+    },
+    "linesCount": 35,
+    "readOnly": false
+   },
+   "sameAsProp": true
+  },
+  "ms": 3,
+  "_wall_ms": 145
+ },
+ "set": {
+  "id": "20261016232131-5e18b4f9",
+  "ok": true,
+  "tick": 98,
+  "result": {
+   "obj": {
+    "name": "_ДемоСтандартныеПодсистемыВызовСервера",
+    "id": "{BCE80083-D770-4BBF-8A0D-B5FB71CAB1E3}",
+    "cls": "ОбщийМодуль"
+   },
+   "ms": 9,
+   "linesBefore": 35,
+   "linesAfter": 38,
+   "bufferMatch": false,
+   "propMatch": false,
+   "bufferHash": "01e34d62",
+   "propHash": "01e34d62",
+   "wantHash": "f6e5e25c",
+   "bufferEol": {
+    "length": 1604,
+    "crlf": 0,
+    "lf": 38,
+    "cr": 0,
+    "endsWithEol": true,
+    "bom": false
+   },
+   "isModified": true
+  },
+  "ms": 14,
+  "_wall_ms": 188
+ },
+ "after": {
+  "id": "20261016232131-f503cf46",
+  "ok": true,
+  "tick": 99,
+  "result": {
+   "obj": {
+    "name": "_ДемоСтандартныеПодсистемыВызовСервера",
+    "id": "{BCE80083-D770-4BBF-8A0D-B5FB71CAB1E3}",
+    "cls": "ОбщийМодуль"
+   },
+   "prop": {
+    "hash": "01e34d62",
+    "eol": {
+     "length": 1604,
+     "crlf": 0,
+     "lf": 38,
+     "cr": 0,
+     "endsWithEol": true,
+     "bom": false
+    }
+   },
+   "buffer": {
+    "hash": "01e34d62",
+    "eol": {
+     "length": 1604,
+     "crlf": 0,
+     "lf": 38,
+     "cr": 0,
+     "endsWithEol": true,
+     "bom": false
+    },
+    "linesCount": 38,
+    "readOnly": false
+   },
+   "sameAsProp": true
+  },
+  "ms": 3,
+  "_wall_ms": 145
+ },
+ "after_equals_wanted": false,
+ "want_hash": "f6e5e25c"
+}

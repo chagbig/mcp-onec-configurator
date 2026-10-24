@@ -1,0 +1,36 @@
+{
+ "МсрСтрока": {
+  "uuid": "3a47efba-84ef-4a74-a63a-c573fc795114",
+  "comment": "mcp: строка 50",
+  "type": "<ns0:Type xmlns:ns0=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:ns1=\"http://v8.1c.ru/8.1/data/core\">\n\t\t\t\t\t\t<ns1:Type>xs:string</ns1:Type>\n\t\t\t\t\t\t<ns1:StringQualifiers>\n\t\t\t\t\t\t\t<ns1:Length>50</ns1:Length>\n\t\t\t\t\t\t\t<ns1:AllowedLength>Variable</ns1:AllowedLength>\n\t\t\t\t\t\t</ns1:StringQualifiers>\n\t\t\t\t\t</ns0:Type>\n\t\t\t\t\t"
+ },
+ "МсрСумма": {
+  "uuid": "cc39d7bf-2906-4239-9acc-23bc7c992edc",
+  "comment": "mcp: число 15,2",
+  "type": "<ns0:Type xmlns:ns0=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:ns1=\"http://v8.1c.ru/8.1/data/core\">\n\t\t\t\t\t\t<ns1:Type>xs:decimal</ns1:Type>\n\t\t\t\t\t\t<ns1:NumberQualifiers>\n\t\t\t\t\t\t\t<ns1:Digits>15</ns1:Digits>\n\t\t\t\t\t\t\t<ns1:FractionDigits>2</ns1:FractionDigits>\n\t\t\t\t\t\t\t<ns1:AllowedSign>Any</ns1:AllowedSign>\n\t\t\t\t\t\t</ns1:NumberQualifiers>\n\t\t\t\t\t</ns0:Type>\n\t\t\t\t\t"
+ },
+ "attrs_xml": [
+  "Партнер",
+  "НаименованиеПолное",
+  "ВидКонтрагента",
+  "ДоговорПоУмолчанию",
+  "ИНН",
+  "КодПоОКПО",
+  "КПП",
+  "ЭтоИностранныйКонтрагент",
+  "СтранаРегистрации",
+  "МсрСтрока",
+  "МсрСумма"
+ ],
+ "new_catalog": {
+  "uuid": "676fbb49-c247-4516-b74e-43d0597a20ee",
+  "name": "МсрТестовыйСправочник",
+  "comment": "mcp: справочник этапа 7"
+ },
+ "uuid_match": {
+  "МсрСтрока": true,
+  "МсрСумма": true,
+  "справочник": true
+ },
+ "deleted_absent": true
+}

@@ -1,0 +1,34 @@
+{
+ "av": "Конфигурация <!>",
+ "add": {
+  "ok": true,
+  "err": null,
+  "before": 0,
+  "after": 1,
+  "events": [
+   {
+    "request": true,
+    "id": "{4DE09BB7-10ED-4D46-B6A5-204A40E337E9}",
+    "name": "Реквизит1",
+    "cls": "Реквизит",
+    "parentId": "{676FBB49-C247-4516-B74E-43D0597A20EE}"
+   },
+   {
+    "request": false,
+    "id": "{4DE09BB7-10ED-4D46-B6A5-204A40E337E9}",
+    "name": "Реквизит1",
+    "cls": "Реквизит",
+    "parentId": "{676FBB49-C247-4516-B74E-43D0597A20EE}"
+   }
+  ],
+  "created": {
+   "request": false,
+   "id": "{4DE09BB7-10ED-4D46-B6A5-204A40E337E9}",
+   "name": "Реквизит1",
+   "cls": "Реквизит",
+   "parentId": "{676FBB49-C247-4516-B74E-43D0597A20EE}"
+  },
+  "renamed": true
+ },
+ "cats": 113
+}

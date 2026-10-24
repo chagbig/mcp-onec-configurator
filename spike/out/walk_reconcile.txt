@@ -1,0 +1,18 @@
+файлов объектов 3625 итого с корнем 10482 мост 10477
+Attribute 3047
+Form 940
+Resource 722
+Dimension 519
+EnumValue 512
+Parameter 392
+Template 190
+TabularSection 186
+Command 147
+Operation 143
+Column 27
+Method 12
+URLTemplate 9
+AddressingAttribute 4
+ExtDimensionAccountingFlag 3
+AccountingFlag 2
+Recalculation 1

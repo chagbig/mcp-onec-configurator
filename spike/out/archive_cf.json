@@ -1,0 +1,65 @@
+{
+ "open": "Основная конфигурация",
+ "archA": {
+  "id": "20261016235016-751d31a8",
+  "ok": true,
+  "tick": 58,
+  "result": {
+   "file": "Y:\\Snegopat-mcp\\backups\\demossl-A-noedits.cf",
+   "sent": true,
+   "ms": 52628,
+   "pathUsed": true,
+   "selectEvents": [
+    {
+     "mode": 1,
+     "defExt": "",
+     "title": "",
+     "initial": "1Cv8.cf",
+     "action": "подставлен путь"
+    }
+   ],
+   "msgBoxes": [
+    {
+     "caption": "",
+     "text": "Сохранение конфигурации в файл Y:\\Snegopat-mcp\\backups\\demossl-A-noedits.cf завершено.",
+     "type": 64,
+     "action": "ОК"
+    }
+   ],
+   "errors": [],
+   "exists": true,
+   "size": 90808819,
+   "ok": true
+  },
+  "ms": 52628,
+  "_wall_ms": 52681
+ },
+ "edit": true,
+ "archB": {
+  "id": "20261016235109-328cc790",
+  "ok": true,
+  "tick": 61,
+  "result": {
+   "file": "Y:\\Snegopat-mcp\\backups\\demossl-B-unsaved-edit.cf",
+   "sent": true,
+   "ms": 34,
+   "pathUsed": false,
+   "selectEvents": [],
+   "msgBoxes": [
+    {
+     "caption": "",
+     "text": "Конфигурация 'Демонстрационная конфигурация \"Библиотека стандартных подсистем\", редакция 3.1' была изменена. Сохранить изменения?",
+     "type": 51,
+     "action": "Отмена"
+    }
+   ],
+   "errors": [],
+   "exists": false,
+   "ok": false
+  },
+  "ms": 35,
+  "_wall_ms": 125
+ },
+ "archA_sig": "ffffff7f",
+ "archB_sig": "[Errno 2] No such file or directory: 'Y:\\\\Snegopat-mcp\\\\backups\\\\demossl-B-unsaved-edit.cf'"
+}

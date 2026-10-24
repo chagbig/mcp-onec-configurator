@@ -1,0 +1,91 @@
+{
+ "Catalog.МсрСправочник": {
+  "uuid": "cfe2fb2a-6536-4787-9114-59b5794361ee"
+ },
+ "Document.МсрДокумент": {
+  "uuid": "e1fb13df-1265-4634-8a27-6c9fa11d944c"
+ },
+ "Document.МсрДокумент.Attribute.МсрКонтрагент": {
+  "uuid": "917fd43a-1336-416f-99dc-b63b5cfb9c4a",
+  "type": [
+   "cfg:CatalogRef.МсрСправочник"
+  ],
+  "comment": "mcp: ссылка на справочник"
+ },
+ "Document.МсрДокумент.Attribute.МсрСумма": {
+  "uuid": "3e7a0c09-848f-469e-8207-83f43fb45572",
+  "type": [
+   "xs:decimal",
+   "N15.2"
+  ],
+  "comment": "mcp: число"
+ },
+ "Document.МсрДокумент.Attribute.МсрТретий": {
+  "uuid": "229434a0-cb14-465f-8838-a60b263c5fbc",
+  "type": [
+   "xs:string",
+   "S10"
+  ],
+  "comment": "mcp: группа непуста"
+ },
+ "Document.МсрДокумент.TabularSection.МсрТовары": {
+  "uuid": "64899cf7-1086-446e-a44e-53f23342b46e",
+  "type": null,
+  "comment": "mcp: табличная часть"
+ },
+ "Document.МсрДокумент.TabularSection.МсрТовары.Attribute.МсрНоменклатура": {
+  "uuid": "cb47a560-fec1-44cb-9ad0-3878bca27b70",
+  "type": [
+   "cfg:CatalogRef.МсрСправочник"
+  ],
+  "comment": null
+ },
+ "Document.МсрДокумент.TabularSection.МсрТовары.Attribute.МсрКоличество": {
+  "uuid": "489213af-3a8b-49f5-80c4-c9e8683f66c7",
+  "type": [
+   "xs:decimal",
+   "N15.3"
+  ],
+  "comment": "mcp: реквизит ТЧ"
+ },
+ "Enum.МсрПеречисление": {
+  "uuid": "e52e3c6f-b9dd-4afd-946a-f79bce2b08e7"
+ },
+ "Enum.МсрПеречисление.EnumValue.Первое": {
+  "uuid": "c46ae37d-abf7-483a-bdbe-4301f1f656c0",
+  "type": null,
+  "comment": "mcp: значение 1"
+ },
+ "Enum.МсрПеречисление.EnumValue.Второе": {
+  "uuid": "88c3f897-8327-48c7-91e5-290c19de4249",
+  "type": null,
+  "comment": "mcp: значение 2"
+ },
+ "InformationRegister.МсрРегистр": {
+  "uuid": "fe7194f0-1a6c-4c82-af12-13a308fbb9ea"
+ },
+ "InformationRegister.МсрРегистр.Resource.МсрСумма": {
+  "uuid": "22226f25-8adb-450e-8629-c9b1c4bd93dc",
+  "type": [
+   "xs:string",
+   "S10"
+  ],
+  "comment": "mcp: ресурс"
+ },
+ "InformationRegister.МсрРегистр.Attribute.МсрКомментарий": {
+  "uuid": "7a2bbf28-20c0-4afb-bdf0-657a0af43f19",
+  "type": [
+   "xs:string",
+   "S10"
+  ],
+  "comment": "mcp: реквизит регистра"
+ },
+ "InformationRegister.МсрРегистр.Dimension.МсрКонтрагент": {
+  "uuid": "fc718968-ce1f-42d1-9772-cf2210b5e2cd",
+  "type": [
+   "xs:string",
+   "S10"
+  ],
+  "comment": "mcp: измерение"
+ }
+}

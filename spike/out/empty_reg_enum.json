@@ -1,0 +1,69 @@
+{
+ "dim": {
+  "ok": true,
+  "err": null,
+  "before": 0,
+  "after": 1,
+  "id": "{FC718968-CE1F-42D1-9772-CF2210B5E2CD}",
+  "renamed": true,
+  "classMismatch": null,
+  "wrong": null,
+  "stray": [],
+  "ms": 79
+ },
+ "res": {
+  "ok": true,
+  "err": null,
+  "before": 0,
+  "after": 1,
+  "id": "{22226F25-8ADB-450E-8629-C9B1C4BD93DC}",
+  "renamed": true,
+  "classMismatch": null,
+  "wrong": null,
+  "stray": [],
+  "ms": 76
+ },
+ "attr": {
+  "ok": true,
+  "err": null,
+  "before": 0,
+  "after": 1,
+  "id": "{7A2BBF28-20C0-4AFB-BDF0-657A0AF43F19}",
+  "renamed": true,
+  "classMismatch": null,
+  "wrong": null,
+  "stray": [],
+  "ms": 125
+ },
+ "ev1": {
+  "ok": true,
+  "err": null,
+  "before": 0,
+  "after": 1,
+  "id": "{C46AE37D-ABF7-483A-BDBE-4301F1F656C0}",
+  "renamed": true,
+  "classMismatch": null,
+  "wrong": null,
+  "stray": [],
+  "ms": 50
+ },
+ "ev2": {
+  "ok": false,
+  "err": null,
+  "before": 1,
+  "after": 1,
+  "id": null,
+  "renamed": null,
+  "classMismatch": null,
+  "wrong": null,
+  "stray": [],
+  "ms": 4
+ },
+ "log": [
+  "activate «РегистрСведений.МсрРегистр» try0: Конфигурация *",
+  "activate «РегистрСведений.МсрРегистр» try0: Конфигурация *",
+  "activate «РегистрСведений.МсрРегистр» try0: Конфигурация *",
+  "activate «Перечисление.МсрПеречисление» try0: Конфигурация *",
+  "activate «Перечисление.МсрПеречисление.ЗначениеПеречисления.Первое» try0: Конфигурация *"
+ ]
+}

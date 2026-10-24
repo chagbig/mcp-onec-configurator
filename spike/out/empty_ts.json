@@ -1,0 +1,31 @@
+{
+ "ts_attrs": [
+  {
+   "name": "Реквизит1",
+   "id": "{CB47A560-FEC1-44CB-9AD0-3878BCA27B70}"
+  }
+ ],
+ "rename": {
+  "code": "exception",
+  "message": "не найден Документ.МсрДокумент.ТабличнаяЧасть.МсрТовары.Реквизит.Реквизит1"
+ },
+ "type": true,
+ "ts_a2": {
+  "ok": true,
+  "err": null,
+  "before": 1,
+  "after": 2,
+  "id": "{489213AF-3A8B-49F5-80C4-C9E8683F66C7}",
+  "renamed": true,
+  "classMismatch": null,
+  "wrong": null,
+  "stray": [],
+  "ms": 58
+ },
+ "ts_a2_type": {
+  "internal": "{\"#\",f5c65050-3bbb-11d5-b988-0050bae0a95d,\n{\"Pattern\",\n{\"N\",15,3,0}\n}\n}"
+ },
+ "log": [
+  "activate «Документ.МсрДокумент.ТабличнаяЧасть.МсрТовары.Реквизит.МсрНоменклатура» try0: Конфигурация *"
+ ]
+}

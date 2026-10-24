@@ -1,0 +1,192 @@
+{
+ "ok": true,
+ "err": null,
+ "after": 0,
+ "events": [
+  {
+   "request": true,
+   "id": "{F82034AB-F08B-4EE9-B4B4-9D89B4454197}",
+   "name": "Форма1",
+   "cls": "Форма",
+   "parentId": "{CFE2FB2A-6536-4787-9114-59B5794361EE}"
+  }
+ ],
+ "modals": [
+  {
+   "stage": 0,
+   "caption": "Конструктор формы справочника"
+  },
+  {
+   "stage": 3,
+   "caption": "Конструктор формы справочника"
+  },
+  {
+   "stage": 1,
+   "caption": "Конструктор формы справочника",
+   "controls": [
+    {
+     "i": 0,
+     "name": "F1",
+     "value": null
+    },
+    {
+     "i": 1,
+     "name": "OK",
+     "value": null
+    },
+    {
+     "i": 2,
+     "name": "Next",
+     "value": null
+    },
+    {
+     "i": 3,
+     "name": "Prev",
+     "value": null
+    },
+    {
+     "i": 4,
+     "name": "Layouter",
+     "value": null
+    },
+    {
+     "i": 5,
+     "name": "ListTypeRB",
+     "value": -1
+    },
+    {
+     "i": 6,
+     "name": "ChooseFormRB",
+     "value": -1
+    },
+    {
+     "i": 7,
+     "name": "ElementFormRB",
+     "value": 0
+    },
+    {
+     "i": 8,
+     "name": "GroupFormRB",
+     "value": -1
+    },
+    {
+     "i": 9,
+     "name": "DefFormRB",
+     "value": -1
+    },
+    {
+     "i": 10,
+     "name": "DefaultForm",
+     "value": true
+    },
+    {
+     "i": 11,
+     "name": "Cancel",
+     "value": null
+    },
+    {
+     "i": 12,
+     "name": "1",
+     "value": "Имя:"
+    },
+    {
+     "i": 13,
+     "name": "Ident",
+     "value": "ФормаЭлемента"
+    },
+    {
+     "i": 14,
+     "name": "3",
+     "value": "Синоним:"
+    },
+    {
+     "i": 15,
+     "name": "5",
+     "value": "Комментарий:"
+    },
+    {
+     "i": 16,
+     "name": "Comment",
+     "value": ""
+    },
+    {
+     "i": 17,
+     "name": "Synonym",
+     "value": "?Объект не поддерживает это свойство или метод"
+    },
+    {
+     "i": 18,
+     "name": "115",
+     "value": "Располагать элементы управления в"
+    },
+    {
+     "i": 19,
+     "name": "nCols",
+     "value": 1
+    },
+    {
+     "i": 20,
+     "name": "116",
+     "value": "колонку(и)"
+    },
+    {
+     "i": 21,
+     "name": "FieldsGrid",
+     "value": null
+    },
+    {
+     "i": 22,
+     "name": "DefFormListAndChoose",
+     "value": false
+    },
+    {
+     "i": 23,
+     "name": "CommandBar",
+     "value": null
+    },
+    {
+     "i": 24,
+     "name": "117",
+     "value": null
+    },
+    {
+     "i": 25,
+     "name": "GroupChoiceFormRB",
+     "value": -1
+    },
+    {
+     "i": 26,
+     "name": "DefFormElemAndGroup",
+     "value": false
+    },
+    {
+     "i": 27,
+     "name": "NewToolBarUp",
+     "value": true
+    },
+    {
+     "i": 28,
+     "name": "NewToolBarBottom",
+     "value": false
+    },
+    {
+     "i": 29,
+     "name": "LogicForm",
+     "value": "T"
+    },
+    {
+     "i": 30,
+     "name": "stLogicForm",
+     "value": "Тип формы:"
+    }
+   ],
+   "action": "Отмена"
+  },
+  {
+   "stage": 2,
+   "caption": "Конструктор формы справочника",
+   "result": 2
+  }
+ ],
+ "stray": []
+}

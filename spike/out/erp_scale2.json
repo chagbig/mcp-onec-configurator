@@ -1,0 +1,47 @@
+{
+ "texts_ОбщегоНазначения": {
+  "ok": true,
+  "err": null,
+  "ms": 222,
+  "lines": 10400,
+  "readOnly": true,
+  "len": 397846
+ },
+ "set_ОбщегоНазначения": {
+  "ok": false,
+  "err": {
+   "code": "exception",
+   "message": "модуль только для чтения"
+  }
+ },
+ "texts_ОбменДаннымиСервер": {
+  "ok": true,
+  "err": null,
+  "ms": 329,
+  "lines": 14860,
+  "readOnly": true,
+  "len": 600319
+ },
+ "set_ОбменДаннымиСервер": {
+  "ok": false,
+  "err": {
+   "code": "exception",
+   "message": "модуль только для чтения"
+  }
+ },
+ "form_save": {
+  "ok": true,
+  "err": null,
+  "size": 988582,
+  "ms": 1518,
+  "wall_s": 1.6
+ },
+ "timer": {
+  "ticks": 108,
+  "ticksInModal": 0,
+  "ticksBusy": 0,
+  "done": 9,
+  "errors": 2,
+  "startedAt": 1792183178854
+ }
+}
