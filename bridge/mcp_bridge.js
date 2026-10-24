@@ -1042,13 +1042,14 @@ function onStgModal(d) {
         stgCapture.modals.push(ev);
         if (d.stage != 1) return;
         var cap = String(d.caption);
-        if (stgCapture.mode == "capture" && /Захват\sобъектов\sв\sхранилище\sконфигурации/i.test(cap)) {
+        if (stgCapture.mode == "capture" && /захват.*хранилище/i.test(cap)) {
             try { d.form.getControl("GetRecursive").value = !!stgCapture.recursive; ev.setRecursive = true; }
             catch (e) { ev.setRecursiveErr = String(e.description); }
             d.cancel = true; d.result = 1; ev.action = "ОК";
-        } else if (stgCapture.mode == "commit" && /Помещение\sв\sхранилище/i.test(cap)) {
-            // Поле комментария ищем по известным именам; без комментария отказ (инвариант 5)
-            var cands = ["Comment", "Комментарий", "Description"], set = false, names = [];
+        } else if (stgCapture.mode == "commit" && /помещени.*хранилище/i.test(cap)) {
+            // Поле комментария помещения — EnrollComment (снято dialog_probe-эквивалентом,
+            // 24.10.2026); без комментария отказ (инвариант 5)
+            var cands = ["EnrollComment", "Comment", "Комментарий", "Description"], set = false, names = [];
             for (var ci = 0; ci < d.form.controlsCount; ci++) {
                 var c = null; try { c = d.form.getControl(ci); } catch (x) { continue; }
                 var cn = safeStr(c && c.name); names.push(cn);
@@ -1101,8 +1102,10 @@ OPS.cfgstore_capture = function (a) {
     var res = { sent: sent, ms: new Date().getTime() - t0, before: before, after: after,
         modals: cap.modals, boxes: cap.boxes };
     if (cap.refused.length) { res.refused = cap.refused; throw new Error("захват прерван незнакомым окном: " + cap.refused.join(" | ")); }
-    // Косвенное постусловие: после захвата команда захвата недоступна, помещения — доступна
-    res.capturedIndirect = after.capture && !after.capture.enabled && after.store && after.store.enabled;
+    // ВНИМАНИЕ: getCmdState(151/152) на 8.3.27.2074 обе команды держит доступными всегда —
+    // косвенный постусловие по ним НЕ работает (проверено 24.10.2026). Факт захвата
+    // проверяется помещением: его диалог перечисляет захваченные объекты.
+    res.capturedIndirect = null;
     return res;
 };
 
@@ -1438,6 +1441,116 @@ if (fso.FileExists(ENABLE_FILE)) {
     writeSession();
     timerId = createTimer(TIMER_MS, SelfScript.self, "onTick");
 }
+
+// Режим снятия модальных диалогов (флаг mcp_dump_modals.on рядом с mcp_bridge.on):
+// обработчик исполняется из простоя ДАЖЕ при открытом модальном окне (спайк, опыт 5),
+// поэтому снимает caption и контролы любого диалога — и команд моста, и чужих
+// (в т.ч. штатных мастеров пакетных операций, где тики заблокированы инвариантом 2).
+// Только запись, ничего не закрывает и не правит.
+var dumpModalsOn = false;
+function onDumpModal(d) {
+    try {
+        if (!dumpModalsOn || d.stage != 1) return;
+        var rec = { caption: safeStr(d.caption), controls: null, err: null };
+        try { rec.controls = listControls(d.form); } catch (e) { rec.err = String(e.description); }
+        writeUtf8Atomic(SESSION_DIR + "modals.jsonl", readModalsLog() + JSON.stringify(rec) + "\n");
+    } catch (e) {}
+}
+function readModalsLog() {
+    try { return readUtf8(SESSION_DIR + "modals.jsonl"); } catch (e) { return ""; }
+}
+
+// Универсальный мастер-раннер (флаг mcp_stg_wizard.json): автоматизация штатных
+// модальных диалогов по шагам {click/set/clickIndex/report}, как конструктор форм
+// этапа 7. Формат: {"dialogs": [{"caption": "...", "steps": [...]}, ...]}.
+// Нужен для мастеров, которые пакетная команда открывает сама (например
+// /ConfigurationRepositoryCreate — командные ключи его поля не заполняют,
+// проверено 24.10.2026). Все действия и значения — только из флаг-файла.
+var wizardJob = null;
+function loadWizardJob() {
+    try {
+        if (!fso.FileExists(ROOT + "mcp_stg_wizard.json")) return null;
+        var j = JSON.parse(readUtf8(ROOT + "mcp_stg_wizard.json"));
+        if (j.dialogs) return j;
+        if (j.caption) return { dialogs: [j] };  // старый формат — один диалог
+        return null;
+    } catch (e) { stat.lastError = "wizard.json: " + e.description; return null; }
+}
+function reportControl(form, name, out) {
+    try { out.push(name + "=" + safeStr(form.getControl(name).value)); }
+    catch (e) { out.push(name + ": " + e.description); }
+}
+function reportAllControls(form, out) {
+    try {
+        for (var i = 0; i < form.controlsCount; i++) {
+            var c = form.getControl(i);
+            var nm = safeStr(c.name);
+            if (nm) out.push(nm + "=" + safeStr(c.value));
+        }
+    } catch (e) { out.push("reportAll: " + e.description); }
+}
+function onWizardModal(d) {
+    try {
+        if (d.stage != 1) return;
+        // флаг перечитывается на каждом диалоге: правки флаг-файла действуют
+        // и в уже запущенном конфигураторе
+        wizardJob = loadWizardJob();
+        if (!wizardJob) return;
+        var job = null;
+        for (var dj = 0; dj < wizardJob.dialogs.length; dj++)
+            if (String(wizardJob.dialogs[dj].caption) == String(d.caption)) { job = wizardJob.dialogs[dj]; break; }
+        if (!job) return;
+        var log = { caption: safeStr(d.caption), steps: [], done: false };
+        try {
+            var steps = job.steps || [];
+            for (var si = 0; si < steps.length; si++) {
+                var st = steps[si], out = [];
+                try {
+                    if (st.set) for (var sn in st.set) if (st.set.hasOwnProperty(sn)) {
+                        d.form.getControl(sn).value = st.set[sn];
+                        reportControl(d.form, sn, out);
+                    }
+                    if (st.click) {
+                        d.form.sendEvent(d.form.getControl(st.click).id, 0);
+                        out.push("нажата " + st.click);
+                    }
+                    // у message box имена контролов пустые — клик по индексу
+                    if (st.clickIndex !== undefined) {
+                        d.form.sendEvent(d.form.getControl(st.clickIndex).id, 0);
+                        out.push("нажат контрол[" + st.clickIndex + "]");
+                    }
+                    if (st.report) for (var ri = 0; ri < st.report.length; ri++)
+                        reportControl(d.form, st.report[ri], out);
+                    if (st.reportAll) reportAllControls(d.form, out);
+                } catch (e) { out.push("ошибка шага " + si + ": " + e.description); }
+                log.steps.push({ step: si, out: out });
+            }
+            log.done = true;
+        } catch (e) { log.err = String(e.description); }
+        writeUtf8Atomic(SESSION_DIR + "wizard.log", readModalsWizardLog() + JSON.stringify(log) + "\n");
+    } catch (e) {}
+}
+function readModalsWizardLog() {
+    try { return readUtf8(SESSION_DIR + "wizard.log"); } catch (e) { return ""; }
+}
+function setDumpModals() {
+    try {
+        var want = fso.FileExists(ROOT + "mcp_dump_modals.on");
+        if (want && !dumpModalsOn) {
+            events.connect(windows, "onDoModal", SelfScript.self, "onDumpModal");
+            dumpModalsOn = true;
+        } else if (!want && dumpModalsOn) {
+            events.disconnect(windows, "onDoModal", SelfScript.self, "onDumpModal");
+            dumpModalsOn = false;
+        }
+        wizardJob = loadWizardJob();
+        if (wizardJob) {
+            try { events.disconnect(windows, "onDoModal", SelfScript.self, "onWizardModal"); } catch (e) {}
+            events.connect(windows, "onDoModal", SelfScript.self, "onWizardModal");
+        }
+    } catch (e) { stat.lastError = "dumpModals: " + e.description; }
+}
+setDumpModals();
 
 function macrosСтатусМоста() {
     Message("mcp_bridge " + BRIDGE_VERSION + ": pid " + myPid + ", тиков " + stat.ticks + ", в модальном " + stat.ticksInModal + ", при busy " + stat.ticksBusy + ", выполнено " + stat.done + ", повторов " + stat.replayed + ", ошибок " + stat.errors + (stat.lastError ? ", последняя: " + stat.lastError : ""));
