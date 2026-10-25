@@ -232,6 +232,26 @@ class TestAddDelete(Base):
             self.tk.md_delete(path="Справочник.Х.Реквизит.У", uuid="")
         self.assertEqual(cm.exception.code, "bad_args")
 
+    def test_first_ts_attribute_refused(self) -> None:
+        """Первый реквизит ТЧ — явный отказ до дерева (26.10.2026)."""
+        calls = {"orig": self.tk.bridge.call}
+
+        def call(pid, op, args=None, timeout=None):
+            if op == "md_object":
+                return {"name": "Т", "id": "x2", "cls": "ТабличнаяЧасть"}
+            if op == "md_children":
+                return {"kind": "Реквизиты", "count": 0, "items": []}
+            return calls["orig"](pid, op, args, timeout)
+
+        self.tk.bridge.call = call
+        try:
+            with self.assertRaises(BridgeError) as cm:
+                self.tk.md_add_child(owner_path="Документ.Д.ТабличнаяЧасть.Т",
+                                     kind="Реквизиты", name="Н")
+            self.assertIn("первый реквизит", str(cm.exception))
+        finally:
+            self.tk.bridge.call = calls["orig"]
+
 
 class TestGating(Base):
     def test_update_db_cfg_forbidden_default(self) -> None:

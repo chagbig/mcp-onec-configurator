@@ -1249,6 +1249,126 @@ function walkViews(v, path, out, depth) {
 OPS.view_list = function (a) { var out = []; walkViews(windows.mainView, "0", out, 0); return out; };
 OPS.active_view = function (a) { var v = windows.getActiveView(); return v ? viewInfo(v, "?") : null; };
 
+// Контролы представления по индексам (диагностика редакторов объектов: панель
+// данных с кнопкой «добавить реквизит» — из спайка, перенесено 26.10.2026)
+// Поиск представления по подстроке заголовка свежим обходом (path из view_list
+// после смены окон не резолвится: mainView к следующему тику другой)
+function findViewByTitle(substr) {
+    var found = null;
+    (function walk(v) {
+        if (found || !v) return;
+        var t = null; try { t = safeStr(v.title); } catch (e) {}
+        if (t && String(t).indexOf(substr) >= 0) { found = v; return; }
+        var lst = null;
+        try { lst = v.enumChilds(); } catch (e) {}
+        if (lst) for (var i = 0; i < lst.count; i++) { walk(lst.item(i)); if (found) return; }
+    })(windows.mainView);
+    return found;
+}
+OPS.view_controls = function (a) {
+    var v = a.title !== undefined ? findViewByTitle(String(a.title)) : viewByPath(a.view);
+    if (!v) throw new Error("представление не найдено: " + (a.title || a.view));
+    var res = [];
+    var src = v;   // контролы ищем и на представлении, и на его внутренней форме
+    try { var f = v.getInternalForm(); if (f) src = f; } catch (eI) {}
+    try {
+        for (var i = 0; i < src.controlsCount; i++) {
+            var c = src.getControl(i), r = { i: i };
+            try { r.name = safeStr(c.name); } catch (e) {}
+            try { r.value = safeStr(c.value); } catch (e) { r.value = "?"; }
+            try { r.id = safeStr(c.id); } catch (e) {}
+            res.push(r);
+        }
+    } catch (e) { res.push({ error: String(e.description), src: "internal" }); }
+    return { view: { title: safeStr(v.title), id: safeStr(v.id) },
+        internalForm: src !== v, controls: res };
+};
+// Прямоугольник контрола внутренней формы в ЭКРАННЫХ координатах + клик мышью по центру.
+// Последний путь к гриду данных редактора (клавиатура окном глотается).
+// Регистрация нового WinAPI не требуется: GetWindowRect/SetCursorPos/mouse_event
+// уже есть в DynamicWrapperX (api.Register по имени вызывает LoadLibrary/GetProcAddress)
+OPS.control_rect = function (a) {
+    throw new Error("control_rect недоступен: DynamicWrapperX не установлен (26.10.2026); первый реквизит ТЧ — вручную");
+};
+OPS.mouse_click = function (a) {
+    throw new Error("mouse_click недоступен: DynamicWrapperX в системе не установлен (26.10.2026)");
+};
+
+// Клавиша в окно фокуса для редактора объекта: только Insert (добавить в гриде данных).
+// Вызов корректен ТОЛЬКО после view_activate (фокус в окне редактора, не в дереве —
+// иначе клавиша уйдёт в дерево метаданных!)
+OPS.key_send = function (a) {
+    var keys = (a.keys && a.keys.length) ? a.keys : [a.key];
+    for (var i = 0; i < keys.length; i++) {
+        var key = keys[i];
+        var okKey = (key === 0x2D) || (key === 0x21) || (key === 0x22); // Ins, PgUp, PgDn
+        if (!okKey) throw new Error("разрешены Ins/PgUp/PgDn, получено " + key);
+    }
+    var av = null; try { av = windows.getActiveView(); } catch (e0) {}
+    var t = av ? safeStr(av.title) : null;
+    if (!t || String(t).indexOf("онфигурация") === 0)
+        throw new Error("фокус в дереве метаданных — клавиши запрещены; сначала view_activate");
+    var hwnd = winApi.getFocus();
+    if (!hwnd) throw new Error("нет фокуса ввода");
+    // Ctrl+клавиша (закладки редактора = Ctrl+PgDn/PgUp)
+    var ctrl = !!a.ctrl;
+    if (ctrl) winApi.sendMessage(hwnd, 0x100, 0x11, 0x011D0001);
+    for (var j = 0; j < keys.length; j++) {
+        winApi.sendMessage(hwnd, 0x100, keys[j], 0x01520001);
+        winApi.sendMessage(hwnd, 0x101, keys[j], 0xC1520001);
+    }
+    if (ctrl) winApi.sendMessage(hwnd, 0x101, 0x11, 0xC11D0001);
+    return { sent: keys.length, ctrl: ctrl, activeTitle: t };
+};
+
+// Активировать MDI-окно представления (view.activate(), как CfgStore.js) и вернуть
+// активное представление — база для клавиатуры в редакторе объекта
+OPS.view_activate = function (a) {
+    var v = findViewByTitle(String(a.title));
+    if (!v) throw new Error("представление не найдено: " + a.title);
+    var ok = null;
+    try { ok = v.activate(); } catch (e) { throw new Error("activate: " + e.description); }
+    var av = null; try { av = windows.getActiveView(); } catch (e2) {}
+    return { activated: ok, activeTitle: av ? safeStr(av.title) : null };
+};
+
+// Послать событие контролу внутренней формы открытого окна (диагностика/клик
+// по кнопке грида данных). Только для окон по подстроке заголовка; код события 0 —
+// клик (как в конструкторе форм этапа 7)
+OPS.control_send_event = function (a) {
+    var v = findViewByTitle(String(a.title));
+    if (!v) throw new Error("представление не найдено: " + a.title);
+    var f = null;
+    try { f = v.getInternalForm(); } catch (e0) {}
+    if (!f) throw new Error("у представления нет внутренней формы");
+    var c = f.getControl(a.control);
+    if (!c) throw new Error("контрол не найден: " + a.control);
+    var ev = (a.event === undefined) ? 0 : a.event;
+    f.sendEvent(c.id, ev);  // sendEvent у ФОРМЫ (как конструктор форм в этапе 7)
+    var after = null;
+    try { after = safeStr(c.value); } catch (e2) {}
+    return { control: a.control, id: safeStr(c.id), valueAfter: after };
+};
+
+// Перебор команд представления (из спайка): доступные команды с подписями
+OPS.view_cmd_scan = function (a) {
+    var v = a.title !== undefined ? findViewByTitle(String(a.title)) : viewByPath(a.view);
+    if (!v) throw new Error("представление не найдено: " + (a.title || a.view));
+    var res = [], groups = a.groups || [];
+    var calls = 0, errors = 0, nulls = 0;
+    for (var g = 0; g < groups.length; g++)
+        for (var n = (a.from || 0); n <= (a.to || 120); n++) {
+            var st = null;
+            calls++;
+            try { st = v.getCmdState(groups[g], n); }
+            catch (e) { errors++; continue; }
+            if (!st) { nulls++; continue; }
+            if (st.enabled || st.text) res.push({ group: groups[g], num: n,
+                enabled: st.enabled, text: safeStr(st.text) });
+        }
+    return { view: viewInfo(v, a.view), calls: calls, errors: errors, found: res };
+};
+
 // ---------- трасса (диагностика) ----------
 
 var trace = null;

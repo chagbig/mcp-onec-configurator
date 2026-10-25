@@ -332,6 +332,19 @@ class Toolkit:
             if not oc:
                 oc = self._call(session, "md_object", self._a(container, path=owner_path),
                                 pid=pid).get("cls", "")
+            # ПЕРВЫЙ реквизит ТЧ невозможен (26.10.2026): узел «Реквизиты» пустой ТЧ
+            # в дереве не отображается, Insert на ТЧ создаёт соседнюю ТЧ; мышиный путь
+            # требует DynamicWrapperX. Отказ до дерева — без побочных действий.
+            if oc == "ТабличнаяЧасть" and kind == "Реквизиты" and not sibling:
+                ch = self._call(session, "md_children",
+                                self._a(container, path=owner_path, kind="Реквизиты"), pid=pid)
+                if not ch.get("count"):
+                    raise BridgeError(
+                        "bad_args",
+                        "первый реквизит табличной части не автоматизирован: узел «Реквизиты» "
+                        "пустой ТЧ в дереве скрыт, Insert создаёт соседнюю ТЧ (26.10.2026); "
+                        "добавьте реквизит в конфигураторе вручную, затем создавайте остальные "
+                        "через sibling")
             table = GROUP_NAV.get(oc)
             if table is None:
                 raise BridgeError("bad_args",
