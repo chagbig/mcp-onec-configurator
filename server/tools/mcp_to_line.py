@@ -29,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from mcp_snegopat.bridge import BridgeError  # noqa: E402
+from mcp_snegopat.bridge import BridgeError, norm_file_key, platform_supported  # noqa: E402
 from mcp_snegopat.config import load_config  # noqa: E402
 from mcp_snegopat.server import Toolkit  # noqa: E402
 
@@ -44,17 +44,24 @@ def run_designer(args: list[str], out_log: Path, res_file: Path,
 
     /DisableStartupDialogs обязателен: без него пакетная команда на ошибке
     (-listFile с несуществующим объектом и т.п.) поднимает МОДАЛЬНОЕ окно
-    «Объект метаданных … не существует» и висит вечно (24.10.2026)."""
+    «Объект метаданных … не существует» и висит вечно (24.10.2026).
+    По таймауту процесс УБИВАЕТСЯ: subprocess.call(timeout) процесс не снимает
+    (ревью 25.10.2026) — остался бы живой 1cv8, держащий базу линии."""
     out_log.parent.mkdir(parents=True, exist_ok=True)
     res_file.unlink(missing_ok=True)
     cmd = [str(PLATFORM), "DESIGNER", "/DisableStartupDialogs"] + args \
         + ["/Out", str(out_log), "/DumpResult", str(res_file)]
+    p = subprocess.Popen(cmd)
     try:
-        rc = subprocess.call(cmd, timeout=timeout)
+        rc = p.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
+        p.kill()
+        p.wait()
         return False, f"таймаут {timeout:.0f} с (процесс снят)"
     if rc != 0:
-        return False, f"код возврата {rc}"
+        tail = out_log.read_text(encoding="utf-8-sig", errors="replace")[-200:] \
+            if out_log.is_file() else ""
+        return False, f"код возврата {rc}" + (f"; лог: {tail}" if tail else "")
     res = res_file.read_text(encoding="utf-8-sig").strip() if res_file.is_file() else ""
     if res and res.lstrip("﻿") != "0":
         return False, f"/DumpResult = {res}"
@@ -66,16 +73,19 @@ def run_designer(args: list[str], out_log: Path, res_file: Path,
 
 
 def session_for_base(tk: Toolkit, live_base: Path) -> int:
-    """Живая сессия именно этой базы (строки соединения сравниваются нормализованно)."""
-    def key(p: Path) -> str:
-        return re.sub(r"[\";\s]", "", f'File="{p}"'.lower().replace("/", "\\"))
-
-    want = key(live_base)
+    """Живая сессия именно этой базы (нормализация как normFilePath моста:
+    / -> \\, нижний регистр, без хвостовых \\) + гейт платформы."""
+    want = norm_file_key(live_base)
     for s in tk.bridge.sessions():
         if not s.alive:
             continue
+        if not platform_supported(s.data.get("platform")):
+            continue
         conn = str(s.data.get("conn") or "")
-        if key(Path(conn.split("=", 1)[1].rstrip(";\" "))) == want if "=" in conn else False:
+        if "=" not in conn:
+            continue
+        value = conn.split("=", 1)[1].rstrip(";\" ")
+        if norm_file_key(Path(value)) == want:
             return s.pid
     raise SystemExit(
         f"нет живой сессии конфигуратора на {live_base}; откройте конфигуратор "
@@ -99,6 +109,13 @@ def main() -> int:
     objects = [o.strip() for o in a.objects.split(",") if o.strip()]
     if not objects:
         raise SystemExit("--objects пуст")
+    # выгрузка именует файлы ПО ИМЕНИ объекта верхнего уровня (2 сегмента):
+    # подчинённые (реквизиты и т.п.) отдельных файлов не получают — постусловие
+    # по ним всегда было бы ложным FAIL (ревью 25.10.2026)
+    for obj in objects:
+        if len(obj.split(".")) != 2:
+            raise SystemExit(f"--objects: «{obj}» — ожидается объект верхнего уровня "
+                             "вида «Вид.Имя»; подчинённые проверяйте чтением XML родителя")
 
     tk = Toolkit(load_config())
     stamp = time.strftime("%Y%m%d-%H%M%S")

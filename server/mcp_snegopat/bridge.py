@@ -63,6 +63,16 @@ def platform_supported(platform) -> bool:
     return str(platform or "").startswith("8.3.27")
 
 
+def norm_file_key(path) -> str:
+    """Нормализация файлового пути для сравнения строк соединения — на манер
+    normFilePath моста: / -> \\, нижний регистр, без хвостовых \\ (ревью 25.10.2026:
+    mcp_to_line сравнивал по своей схеме и расходился с мостом)."""
+    s = str(path).replace("/", "\\").strip().lower()
+    while len(s) > 3 and s.endswith("\\"):
+        s = s[:-1]
+    return s
+
+
 def norm_eol(t: str) -> str:
     return t.replace("\r\n", "\n").replace("\r", "\n")
 
@@ -160,9 +170,11 @@ class Bridge:
         Сессии на непроверенной платформе (≠8.3.27) не выбираются — движение по
         сдвинутым vtable отдаёт мусор; обход — allow_unverified_platform в конфиге.
         """
-        live = [s for s in self.live_sessions()
-                if self.cfg.allow_unverified_platform or platform_supported(s.data.get("platform"))]
-        skipped = [s for s in self.live_sessions() if s not in live]
+        all_live = self.live_sessions()  # один срез реестра (ревью 25.10.2026)
+        allowed = self.cfg.allow_unverified_platform
+        live = [s for s in all_live
+                if allowed or platform_supported(s.data.get("platform"))]
+        skipped = [s for s in all_live if s not in live]
         if pid is not None:
             for s in live:
                 if s.pid == pid:
@@ -215,14 +227,22 @@ class Bridge:
             if resp_path.is_file():
                 try:
                     resp = json.loads(resp_path.read_text(encoding="utf-8-sig"))
-                    resp_path.unlink(missing_ok=True)
-                    break
+                    break  # разбор удался; файл ответа удаляем ПОСЛЕ использования
                 except (OSError, json.JSONDecodeError):
                     pass  # недописанный ответ — подождать
             time.sleep(0.02)
-        if resp is None:
+        if resp is not None:
+            try:
+                resp_path.unlink(missing_ok=True)
+            except OSError:
+                pass  # файл удержан читателем — ответ уже разобран, это не таймаут
+        else:
             self._journal(pid, op, False, time.time() - t0, "timeout")
-            raise BridgeError("timeout", f"нет ответа моста за {timeout:.0f} с (op={op})")
+            raise BridgeError(
+                "timeout", f"нет ответа моста за {timeout:.0f} с (op={op}, id={rid}: "
+                "перед повтором проверьте bridge_wait по этому id — операция могла "
+                "завершиться позже; повторять только при состоянии unknown)",
+                {"id": rid, "op": op})
         self._journal(pid, op, bool(resp.get("ok")), time.time() - t0,
                       (resp.get("error") or {}).get("code"))
         if not resp.get("ok"):

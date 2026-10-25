@@ -68,10 +68,19 @@ def main() -> int:
     work = Path(a.dir)
     work.mkdir(parents=True, exist_ok=True)
 
+    if a.src_cf:
+        src = Path(a.src_cf)
+        if not src.is_file() or src.stat().st_size < 1000:
+            raise SystemExit(f"cf не найден или пуст: {src}")  # ДО удаления старого макета
     if base.exists() and any(base.iterdir()):
         if not a.reset:
             raise SystemExit(f"{base} существует и не пуст; для пересоздания — --reset "
                              "(несохранённые правки агента будут потеряны)")
+        # rmtree только по признакам базы 1С (ревью 25.10.2026): опечатка в --base
+        # не должна стоить произвольного каталога
+        markers = [p.name for p in base.iterdir() if p.name in ("1Cv8.1CD", "1Cv8tmp.1CD", "1cv8ddb.1CD")]
+        if not markers:
+            raise SystemExit(f"{base} не выглядит базой 1С (нет 1Cv8.1CD) — --reset отказался удалять")
         shutil.rmtree(base)
     if base.exists():
         raise SystemExit(f"{base} занят и не удаляется — закрыт ли конфигуратор?")
@@ -82,19 +91,15 @@ def main() -> int:
         raise SystemExit("CREATEINFOBASE не удался (путь? права?)")
     print(f"  ok ({time.time()-t0:.1f} с)")
 
-    if a.src_cf:
-        src = Path(a.src_cf)
-        if not src.is_file() or src.stat().st_size < 1000:
-            raise SystemExit(f"cf не найден или пуст: {src}")
-        print(f"загрузка {src.name} ({src.stat().st_size} байт)...", flush=True)
-        for name, args in (
-            ("load", ["/F", str(base), "/LoadCfg", str(src)]),
-            ("upd", ["/F", str(base), "/UpdateDBCfg"]),
-        ):
-            ok = run_designer(args, work, name)
-            print(f"  {name}: {'ok' if ok else 'FAIL'}", flush=True)
-            if not ok:
-                return 1
+    print(f"загрузка {src.name} ({src.stat().st_size} байт)...", flush=True)
+    for name, args in (
+        ("load", ["/F", str(base), "/LoadCfg", str(src)]),
+        ("upd", ["/F", str(base), "/UpdateDBCfg"]),
+    ):
+        ok = run_designer(args, work, name)
+        print(f"  {name}: {'ok' if ok else 'FAIL'}", flush=True)
+        if not ok:
+            return 1
 
     print(f"макет готов: {base} ({time.time()-t0:.1f} с)")
     return 0

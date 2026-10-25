@@ -10,13 +10,15 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 import time
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 
 from . import __version__
-from .bridge import Bridge, BridgeError, fnv1a, norm_eol
+from .bridge import Bridge, BridgeError
 from .config import Config, load_config
 
 # ---------- навигация дерева для создания подчинённых (этап 7, снято с экрана 17.10.2026) ----------
@@ -209,6 +211,13 @@ class Toolkit:
     SYN_TYPE_GUID = "87024738-fc2a-4436-ada1-df79d395c424"
 
     def _synonym_internal(self, synonym: str) -> str:
+        # кавычка/обратный слэш/перевод строки ломают внутреннее представление
+        # (ревью 25.10.2026): записать их через этот путь нельзя — отказываем явно
+        bad = [c for c in synonym if c in '"\\\n\r\t']
+        if bad:
+            raise BridgeError("bad_args",
+                              f"синоним содержит недопустимые символы {bad!r} "
+                              "(кавычка, обратный слэш, переводы строк)")
         return '{"#",%s,\n{1,"ru","%s"}\n}' % (self.SYN_TYPE_GUID, synonym)
 
     def md_set_synonym(self, session: int | None = None, container: int | None = None,
@@ -364,15 +373,21 @@ class Toolkit:
         if kind in CONSTRUCTOR_KINDS:
             # Insert открывает конструктор; его закрывает мастер-раннер моста.
             # Клик из тика внутри конструктора вешает поток — только leave+флаг-файл.
+            caption = CONSTRUCTOR_KINDS[kind]
             self._set_wizard_dialog(
-                CONSTRUCTOR_KINDS[kind],
+                caption,
                 [{"set": self._constructor_fields(kind, name, comment),
                   "report": list(self._constructor_fields(kind, name, comment))},
                  {"click": "OK"}])
             args["modalPolicy"] = "leave"
-            self._call(session, "md_add_child", args, pid=pid, timeout=120.0)
-            res = self._wait_constructor_child(pid, container, owner_path or "", kind,
-                                               expect, name)
+            try:
+                self._call(session, "md_add_child", args, pid=pid, timeout=120.0)
+                res = self._wait_constructor_child(pid, container, owner_path or "", kind,
+                                                   expect, name)
+            finally:
+                # снимаем запись независимо от исхода — иначе мастер-раннер навсегда
+                # перехватывает и РУЧНЫЕ конструкторы человека с этим заголовком
+                self._clear_wizard_dialog(caption)
             if synonym and res.get("created"):
                 self._call(session, "prop_set_internal",
                            self._a(container,
@@ -558,6 +573,10 @@ class Toolkit:
 
     # ---------- конструкторные виды (ОбщиеФормы/ОбщиеМакеты) ----------
 
+    # флаг-файл читается мостом на каждом модальном окне; запись — атомарная,
+    # под замком (sync-инструменты SDK идут в пуле потоков — ревью 25.10.2026)
+    _wizard_lock = threading.Lock()
+
     @staticmethod
     def _constructor_fields(kind: str, name: str, comment: str | None) -> dict:
         """Поля конструктора, снятые дампером модалей 24.10.2026 (Ident в обоих)."""
@@ -566,20 +585,48 @@ class Toolkit:
             fields["Comment"] = comment
         return fields
 
+    def _wizard_flag_path(self) -> Path:
+        return Path(self.cfg.root) / "mcp_stg_wizard.json"
+
     def _set_wizard_dialog(self, caption: str, steps: list[dict]) -> None:
         """Прописать диалог в флаг-файл мастер-раннера (мост перечитывает его
-        на каждом модальном окне)."""
-        flag = Path(self.cfg.root) / "mcp_stg_wizard.json"
-        data: dict = {"dialogs": []}
-        if flag.is_file():
-            try:
-                data = json.loads(flag.read_text(encoding="utf-8-sig"))
-            except (OSError, json.JSONDecodeError):
-                data = {"dialogs": []}
-        dialogs = [d for d in data.get("dialogs", []) if d.get("caption") != caption]
-        dialogs.append({"caption": caption, "steps": steps})
-        flag.write_text(json.dumps({"dialogs": dialogs}, ensure_ascii=False, indent=1),
-                        encoding="utf-8")
+        на каждом модальном окне). Запись атомарная (tmp + os.replace)."""
+        with self._wizard_lock:
+            self._write_wizard_dialogs(self._read_wizard_dialogs(), caption, steps)
+
+    def _clear_wizard_dialog(self, caption: str) -> None:
+        """Удалить диалог из флаг-файла: запись ОБЯЗАТЕЛЬНО снимается после
+        создания — иначе мастер-раннер навсегда «закрывает» и РУЧНЫЕ конструкторы
+        человека с этим заголовком (ревью 25.10.2026, HIGH)."""
+        with self._wizard_lock:
+            dialogs = self._read_wizard_dialogs()
+            if any(d.get("caption") == caption for d in dialogs):
+                self._write_wizard_dialogs(dialogs, caption, None)
+
+    def _read_wizard_dialogs(self) -> list[dict]:
+        flag = self._wizard_flag_path()
+        if not flag.is_file():
+            return []
+        try:
+            data = json.loads(flag.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        if not isinstance(data, dict):
+            return []
+        dialogs = data.get("dialogs", [])
+        return dialogs if isinstance(dialogs, list) else []
+
+    def _write_wizard_dialogs(self, dialogs: list[dict], caption: str,
+                              steps: list[dict] | None) -> None:
+        dialogs = [d for d in dialogs if d.get("caption") != caption]
+        if steps is not None:
+            dialogs.append({"caption": caption, "steps": steps})
+        flag = self._wizard_flag_path()
+        flag.parent.mkdir(parents=True, exist_ok=True)
+        tmp = flag.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({"dialogs": dialogs}, ensure_ascii=False, indent=1),
+                       encoding="utf-8")
+        os.replace(tmp, flag)
 
     def _wait_constructor_child(self, pid: int, container: int | None,
                                  owner_path: str, kind: str, expect: str,

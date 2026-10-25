@@ -163,9 +163,15 @@ var CLASS_PLURAL = {
     "параметрфункциональныхопций": "ПараметрыФункциональныхОпций",
     "определяемыйтип": "ОпределяемыеТипы", "хранилищенастроек": "ХранилищаНастроек",
     "общаякоманда": "ОбщиеКоманды", "группакоманд": "ГруппыКоманд",
-    "общаяформа": "ОбщиеФормы", "общиймакет": "ОбщиеМакеты"
+    "общиймакет": "ОбщиеМакеты"
 };
 
+// контейнер с открытой конфигурацией — для операций, читающих дерево напрямую
+function containerOrThrow(idx) {
+    var c = container(idx);
+    if (!c.rootObject) throw new Error("контейнер без открытой конфигурации");
+    return c;
+}
 function container(idx) {
     if (idx === undefined || idx === null) return metadata.current;
     var c = metadata.getContainer(idx);
@@ -251,7 +257,7 @@ OPS.session_info = function (a) {
 
 // Счёт объектов верхнего уровня по всем видам корня.
 OPS.md_counts = function (a) {
-    var root = container(a.container).rootObject;
+    var root = containerOrThrow(a.container).rootObject;
     var mdc = root.mdclass;
     var res = {};
     for (var i = 0; i < mdc.childsClassesCount; i++) {
@@ -277,7 +283,7 @@ OPS.md_walk = function (a) {
                 walk(ch, depth + 1);
             }
         }
-    })(container(a.container).rootObject, 0);
+    })(containerOrThrow(a.container).rootObject, 0);
     return { total: total, maxDepth: maxDepth, bad: bad, ms: new Date().getTime() - t0 };
 };
 
@@ -308,7 +314,7 @@ OPS.md_tree = function (a) {
         items.push({ kind: flat[q].kind, name: String(ch.name), id: String(ch.id), cls: String(ch.mdclass.name(1)) });
     }
     return { obj: objInfo(obj), kinds: kinds, total: total, offset: offset, limit: limit,
-        items: items, hasMore: offset + items.length < total };
+        items: items, hasMore: limit > 0 && offset + items.length < total };
 };
 
 // Список подчинённых заданного вида (имена и uuid) — сверки до/после.
@@ -330,7 +336,7 @@ OPS.md_find = function (a) {
     var t0 = new Date().getTime();
     var matches = [], truncated = false;
     // стек: {obj, path} — path сам объект относительно корня (у корня — "")
-    var stack = [{ obj: container(a.container).rootObject, path: "" }];
+    var stack = [{ obj: containerOrThrow(a.container).rootObject, path: "" }];
     while (stack.length) {
         var cur = stack.pop();
         var obj = cur.obj;
@@ -458,7 +464,7 @@ OPS.type_lookup = function (a) {
     for (var i = 0; i < lst.length; i++) {
         var t = lst.item(i);
         if (!a.name || String(t.name).toLowerCase() == want) res.push({ name: String(t.name), clsid: String(t.clsid) });
-        if (res.length > (a.limit || 20)) break;
+        if (res.length >= (a.limit || 20)) break;
     }
     return { total: lst.length, found: res };
 };
@@ -581,21 +587,40 @@ OPS.form_save = function (a) {
     var f = v8files.open("file://" + path, 0x2 | 0x8 | 0x10);
     if (!f) throw new Error("не открыт файл " + path);
     var t0 = new Date().getTime();
-    ep.saveToFile(f);
-    f.close();
-    return { file: path, size: fso.GetFile(path).Size, ms: new Date().getTime() - t0 };
+    try {
+        ep.saveToFile(f);
+    } finally {
+        f.close();
+    }
+    // постусловие (инвариант 3): перечитать и отдать хеш — form_load обязан
+    // сверить его с текущим состоянием формы перед загрузкой
+    var text = readUtf8(path);
+    return { file: path, size: fso.GetFile(path).Size, ms: new Date().getTime() - t0,
+        hash: fnv1a(normEol(text)), lines: normEol(text).split("\n").length };
 };
 OPS.form_load = function (a) {
     var path = formFile(a.file);
     if (!fso.FileExists(path)) throw new Error("нет файла " + path);
+    if (!a.expected_hash) throw new Error("expected_hash обязателен (снимите form_save)");
+    // инвариант 4: текущее состояние формы выгружается во временный файл и сверяется
+    // с expected_hash — иначе loadFromFile затрёт несохранённые правки человека
+    var cur = FORMS_DIR + "__current_" + myPid + ".bin";
     var ep = extPropWithEditor(a);
-    var f = v8files.open("file://" + path, 0x8);
+    var f = v8files.open("file://" + cur, 0x2 | 0x8 | 0x10);
+    if (!f) throw new Error("не открыт временный файл");
+    try { ep.saveToFile(f); } finally { f.close(); }
+    var curHash = fnv1a(normEol(readUtf8(cur)));
+    try { fso.DeleteFile(cur, true); } catch (eDel) {}
+    if (a.expected_hash !== curHash)
+        throw new Error("expected_hash не совпал: текущее состояние формы " + curHash +
+            " (форма изменена с момента form_save — отказ, правки не тронуты)");
+    f = v8files.open("file://" + path, 0x8);
     if (!f) throw new Error("не открыт файл " + path);
     var t0 = new Date().getTime();
-    var ok = ep.loadFromFile(f);
-    f.close();
-    // loadFromFile не выставляет isModified (опыт 4а) — правку надо отмечать сохранением
-    return { file: path, loaded: ok, ms: new Date().getTime() - t0, isModified: container(a.container).isModified };
+    var ok;
+    try { ok = ep.loadFromFile(f); } finally { f.close(); }
+    return { file: path, loaded: ok, ms: new Date().getTime() - t0,
+        isModified: container(a.container).isModified };
 };
 OPS.extprop_probe = function (a) {
     var obj = resolve(a);
@@ -906,8 +931,10 @@ function onDelBox(m) {
         delCapture.boxes.push(ev);
         m.cancel = true;
         var t = m.type & 0x0F;
-        if ((t == 4 || t == 3 || t == 1) && /удал/i.test(String(m.text))) { m.result = (t == 1 ? 1 : 6); ev.action = "Да"; }
-        else { m.result = 2; ev.action = "Отмена"; }
+        // только известный вопрос удаления; прочее — Отмена + refused (инвариант 6, ревью LOW 8)
+        if (t == 4 && /удалить объект конфигурации/i.test(String(m.text))) { m.result = 6; ev.action = "Да"; }
+        else { m.result = 2; ev.action = "Отмена (незнакомый вопрос)";
+            delCapture.refused.push(safeStr(m.text) || safeStr(m.caption)); }
     } catch (e) {}
 }
 function onDelModal(d) {
@@ -931,7 +958,7 @@ OPS.md_delete = function (a) {
         var avTitle = av ? safeStr(av.title) : null;
         if (!avTitle || String(avTitle).indexOf("Конфигурация") != 0) throw new Error("фокус не в дереве метаданных: активно «" + avTitle + "»");
     }
-    delCapture = { boxes: [], modals: [], md: [] };
+    delCapture = { boxes: [], modals: [], md: [], refused: [] };
     a_delModalAllowed = a.allowModals || [];
     try {
         events.connect(windows, "onMessageBox", SelfScript.self, "onDelBox");
@@ -947,6 +974,8 @@ OPS.md_delete = function (a) {
         try { events.disconnect(metadata, "MetaDataEvent", SelfScript.self, "onDelMd"); } catch (e) {}
     }
     var cap = delCapture; delCapture = null;
+    if (cap.refused.length)
+        throw new Error("удаление прервано незнакомым вопросом: " + cap.refused.join(" | "));
     var owner2 = resolve({ container: a.container, path: parentPath });
     var after = owner2.childObjectsCount(kind), still = false;
     for (var i = 0; i < after; i++) if (String(owner2.childObject(kind, i).id) == id) still = true;
@@ -1317,11 +1346,12 @@ function containersInfo() {
     return conts;
 }
 
-function writeSession() {
+function writeSession(light) {
     try {
         var o = { pid: sessionBase.pid, conn: sessionBase.conn, platform: sessionBase.platform,
             bridge: BRIDGE_VERSION, heartbeat: new Date().getTime(), stat: stat,
-            modal: windows.modalMode, containers: containersInfo() };
+            modal: windows.modalMode };
+        if (!light) o.containers = containersInfo();
         if (running) o.running = running;
         writeUtf8Atomic(sessionFile, JSON.stringify(o));
     } catch (e) { stat.lastError = "writeSession: " + e.description; }
@@ -1330,6 +1360,7 @@ function writeSession() {
 // ---------- цикл ----------
 
 function cacheResponse(id, text) {
+    if (text.length > 1048576) return; // большие ответы (module_get with_text) не кэшируем
     respCache[id] = text;
     respCacheOrder.push(id);
     while (respCacheOrder.length > RESP_CACHE_MAX) {
@@ -1414,17 +1445,25 @@ function handle(file) {
     var text;
     try { text = JSON.stringify(resp); }
     catch (e) { text = JSON.stringify({ id: id, ok: false, error: { code: "serialize", message: String(e.description) } }); }
-    writeUtf8Atomic(respPath, text);
-    cacheResponse(id, text);
+    try {
+        writeUtf8Atomic(respPath, text);
+        cacheResponse(id, text);
+    } catch (eWrite) { stat.lastError = "запись ответа " + id + ": " + eWrite.description; }
     stat.done++;
 }
 
 function onTick(timerID) {
     try {
         stat.ticks++;
-        if (busy) { stat.ticksBusy++; return; }
+        if (busy) { stat.ticksBusy++;
+            // heartbeat в долгой операции: лёгкая запись БЕЗ containersInfo
+            // (метаданные из вложенного тика не трогаем) — иначе живая сессия
+            // выглядит мёртвой (ревью 25.10.2026)
+            if (stat.ticksBusy % 40 == 1) writeSession(true);
+            return; }
         if (windows.modalMode != 0) { stat.ticksInModal++; if (stat.ticksInModal % 20 == 1) writeSession(); return; }
         if (!fso.FileExists(ENABLE_FILE)) return;
+        if (stat.ticks % 20 == 0) setDumpModals(); // подключение wizard-раннера и дампера — не только на старте
         busy = true;
         try {
             var f = nextRequest();
@@ -1440,11 +1479,16 @@ function onTick(timerID) {
 }
 
 if (fso.FileExists(ENABLE_FILE)) {
+    if (typeof JSON == "undefined") {
+        writeUtf8Atomic(ROOT + "mcp_bridge-JSCRIPT58-REQUIRED.txt",
+            "Мост не запущен: нужен JScript 5.8 (JSON). " + new Date().getTime());
+    } else {
     if (!fso.FolderExists(SESSION_DIR)) fso.CreateFolder(SESSION_DIR);
     if (!fso.FolderExists(REQ_DIR)) fso.CreateFolder(REQ_DIR);
     if (!fso.FolderExists(RESP_DIR)) fso.CreateFolder(RESP_DIR);
     writeSession();
     timerId = createTimer(TIMER_MS, SelfScript.self, "onTick");
+    }
 }
 
 // Режим снятия модальных диалогов (флаг mcp_dump_modals.on рядом с mcp_bridge.on):
@@ -1497,6 +1541,11 @@ function reportAllControls(form, out) {
 function onWizardModal(d) {
     try {
         if (d.stage != 1) return;
+        // не вмешиваться в диалоги, перехваченные операцией моста: порядок
+        // обработчиков не гарантирован, а wizard нажимает кнопки без проверки
+        // заголовка политики (инвариант 6) — ревью 25.10.2026, HIGH-риск пересечения
+        if (stgCapture || updCapture || addCapture || delCapture || pendingArchive ||
+            probeCapture || synCapture) return;
         // флаг перечитывается на каждом диалоге: правки флаг-файла действуют
         // и в уже запущенном конфигураторе
         wizardJob = loadWizardJob();
