@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from fake_bridge import FakeBridge  # noqa: E402
 from mcp_snegopat.bridge import Bridge, BridgeError, NoSessionError, fnv1a  # noqa: E402
@@ -294,6 +295,55 @@ class TestGating(Base):
         with self.assertRaises(BridgeError) as cm:
             self.tk.module_set(path="А", prop="Модуль", text="x")
         self.assertEqual(cm.exception.code, "bad_args")
+
+
+class TestFormText(unittest.TestCase):
+    """Шапка-нормализатор внутреннего текста формы (этап 8, §4.1)."""
+
+    ACTIVE = "{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"
+
+    def test_normalize_active_element(self) -> None:
+        from form_text import normalize_form_text, texts_equal
+        a = self.ACTIVE + '"ФормаКоманднаяПанель",'
+        b = self.ACTIVE + '"",'
+        self.assertEqual(normalize_form_text(a), normalize_form_text(b))
+        self.assertTrue(texts_equal(a, b))
+
+    def test_normalize_keeps_other_fields(self) -> None:
+        from form_text import normalize_form_text
+        t = "{-1,02023637-7868-4a5f-8576-835a76e0c9ba},1,0,0,9," + '"ИмяЭлемента",'
+        self.assertEqual(normalize_form_text(t), t)
+
+    def test_texts_equal_eol(self) -> None:
+        from form_text import texts_equal
+        crlf = "{4," + chr(13) + chr(10) + "{50,{x}"
+        cr = "{4," + chr(13) + "{50,{x}"
+        self.assertTrue(texts_equal(crlf, cr))
+
+    def test_normalize_real_shape(self) -> None:
+        from form_text import texts_equal
+        cf = self.ACTIVE + '"",'
+        fs = self.ACTIVE + '"ФормаКоманднаяПанель",'
+        self.assertTrue(texts_equal(cf, fs))
+
+
+class TestCfInspect(unittest.TestCase):
+    """cf_inspect: имена заголовков записей (без бинарных срабатываний)."""
+
+    def test_header_name(self) -> None:
+        import cf_inspect as ci
+        name = "40916224-d255-42af-a76d-ff676ac881eb"
+        payload = bytes(16) + bytes(5) + name.encode("utf-16-le") + bytes(4)
+        self.assertEqual(ci._header_name(payload), name)
+
+    def test_header_name_rejects_garbage(self) -> None:
+        import cf_inspect as ci
+        toc = b"/" + b"\r\n" + b"\x02\x00\x00" + b"\xae\x02\x00\x00" + b"\xff\xff\xff\x7f" * 3
+        self.assertIsNone(ci._header_name(toc))
+
+    def test_header_name_short(self) -> None:
+        import cf_inspect as ci
+        self.assertIsNone(ci._header_name(b"root\x00\x00"))
 
 
 class TestServerBuild(unittest.TestCase):
