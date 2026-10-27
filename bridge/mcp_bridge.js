@@ -1663,9 +1663,13 @@ function onWizardModal(d) {
         if (d.stage != 1) return;
         // не вмешиваться в диалоги, перехваченные операцией моста: порядок
         // обработчиков не гарантирован, а wizard нажимает кнопки без проверки
-        // заголовка политики (инвариант 6) — ревью 25.10.2026, HIGH-риск пересечения
-        if (stgCapture || updCapture || addCapture || delCapture || pendingArchive ||
-            probeCapture || synCapture) return;
+        // заголовка политики (инвариант 6) — ревью 25.10.2026, HIGH-риск пересечения.
+        // ИСКЛЮЧЕНИЕ (регресс 27.10.2026 на 1.6.43): md_add_child с политикой leave
+        // СОЗНАТЕЛЬНО отдаёт конструктор мастеру — guard блокировал ОК, конструктор
+        // висел; caption всё равно проверяется ниже, чужие диалоги не трогаем
+        var leaveYield = addCapture && addCapture.modalPolicy == "leave";
+        if (!leaveYield && (stgCapture || updCapture || addCapture || delCapture ||
+            pendingArchive || probeCapture || synCapture)) return;
         // флаг перечитывается на каждом диалоге: правки флаг-файла действуют
         // и в уже запущенном конфигураторе
         wizardJob = loadWizardJob();
