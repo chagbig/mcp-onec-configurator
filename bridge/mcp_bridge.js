@@ -569,6 +569,31 @@ OPS.module_patch = function (a) {
 
 // ---------- формы (внутренний текст, этап 8 плана: через открытый редактор) ----------
 
+// Frame-группа («Основные команды меню», commands.js): FileSave(4) «Сохранить
+// документ» / FileClose(3) «Закрыть документ» активному документу. П3 28.10.2026:
+// form_load меняет ТОЛЬКО буфер редактора (isModified контейнера не выставляется,
+// config_save правку не забирает); FileSave буфер не коммитит — пробуем close.
+var FRAME_GROUP = "{00000000-0000-0000-0000-000000000000}";
+OPS.editor_commit = function (a) {
+    var num = a.num === undefined ? 4 : a.num;
+    if (num !== 3 && num !== 4) throw new Error("разрешены FileClose(3)/FileSave(4)");
+    var v = findViewByTitle(String(a.title));
+    if (!v) throw new Error("представление не найдено: " + a.title);
+    try { v.activate(); } catch (e) { throw new Error("activate: " + e.description); }
+    var av = null;
+    try { av = windows.getActiveView(); } catch (eA) {}
+    var t = av ? safeStr(av.title) : null;
+    if (!t || String(t).indexOf(String(a.title)) < 0)
+        throw new Error("активация не удалась: активно «" + t + "»");
+    var st = null;
+    try { st = getCmdState(FRAME_GROUP, num); } catch (eS) { st = "?" + eS.description; }
+    var sent = sendCommand(FRAME_GROUP, num);
+    var si = null;
+    try { si = container(a.container); } catch (eI) {}
+    return { sent: sent, num: num, cmdState: st, activeTitle: t,
+        isModified: si ? si.isModified : null };
+};
+
 function formFile(name) {
     if (!/^[A-Za-z0-9_.\-]+$/.test(String(name))) throw new Error("недопустимое имя файла " + name);
     if (!fso.FolderExists(FORMS_DIR)) fso.CreateFolder(FORMS_DIR);
