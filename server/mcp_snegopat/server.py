@@ -646,26 +646,32 @@ class Toolkit:
         return {"extensions": exts, "heartbeatAge_s": si.get("heartbeatAge_s")}
 
     def ext_dump_cfe(self, session: int, name: str, file: str, base_path: str = "") -> dict:
-        """Выгрузить СОХРАНЁННОЕ расширение в .cfe пакетно (/DumpCfg -Extension).
-        Требования: расширение в ext_list с isModified=false (cfe снимает только
-        сохранённое); file — [A-Za-z0-9_.-].cfe; base_path — база-источник (по умолчанию
-        база сессии; пакетный вызов открывает независимое соединение — на занятой базе
-        возможен отказ, тогда скопируйте базу). Загрузка в слот: mockup_init +
-        /LoadCfg <file> -Extension <name> (docs/stage-13-extensions.md §9)."""
+        """Выгрузить расширение в .cfe пакетно (/DumpCfg -Extension) по КОПИИ базы.
+        Если расширение открыто (ext_list) — гейт isModified=false (cfe снимает только
+        сохранённое). Если НЕ открыто (факт М-4: созданное не появляется в контейнерах),
+        но существует в базе (пакетная проверка) — снимается как есть (созданное/не
+        редактированное расширение сохранено по определению; после правок дерево нужно
+        открыть и сохранить — иначе cfe неполный). file — [A-Za-z0-9_.-].cfe.
+        Загрузка в слот: mockup_init + /LoadCfg <file> -Extension <name>."""
         import re as _re
         import subprocess as _sp
         import os as _os
         if not _re.fullmatch(r"[A-Za-z0-9_.\-]+\.cfe", file):
             raise BridgeError("bad_args", "file: [A-Za-z0-9_.-].cfe")
+        open_status = "not-open"
         exts = self.ext_list(session=session).get("extensions", [])
         mine = [e for e in exts if name in (e.get("root") or "") or name in (e.get("identifier") or "")]
         if not mine:
-            raise BridgeError("bad_args",
-                              f"расширение «{name}» не найдено среди открытых (ext_list)")
-        if any(e.get("isModified") for e in mine):
-            raise BridgeError("bad_args",
-                              "расширение изменено (isModified=true) — сохраните сначала: "
-                              "cfe снимает только сохранённое состояние")
+            base0 = base_path or str(_session_base_path(self.bridge, session))
+            if not _ext_exists_packed(base0, name):
+                raise BridgeError("bad_args",
+                                  f"расширение «{name}» не найдено ни среди открытых, ни в базе")
+        else:
+            open_status = "open"
+            if any(e.get("isModified") for e in mine):
+                raise BridgeError("bad_args",
+                                  "расширение изменено (isModified=true) — сохраните сначала "
+                                  "(ext_save): cfe снимает только сохранённое состояние")
         base = base_path or str(_session_base_path(self.bridge, session))
         out = r"Y:\Snegopat-mcp\backups\ext-%s" % file
         # пакетный вызов на базе, открытой живым конфигуратором, падает
@@ -698,7 +704,8 @@ class Toolkit:
             raise BridgeError("ext_dump_failed", f"rc={r.returncode}, res={res}")
         if not _os.path.isfile(out) or _os.path.getsize(out) == 0:
             raise BridgeError("ext_dump_failed", "cfe не создан")
-        return {"file": out, "size": _os.path.getsize(out), "res": res}
+        return {"file": out, "size": _os.path.getsize(out), "res": res,
+                "open_status": open_status}
 
     def ext_save(self, session: int, name: str) -> dict:
         """Сохранить расширение (штатное «Сохранить документ» при активном дереве
@@ -750,6 +757,8 @@ class Toolkit:
         _os.replace(tmp, flag)
         try:
             self._call(session, "view_activate", {"title": "Расширения конфигурации"})
+            self._call(session, "activate_self", {})  # фокус ввода в конфигуратор
+            self._call(session, "key_send", {"key": 0x09})  # Tab — фокус в грид
             self._call(session, "key_send", {"key": 0x2D})  # Ins — открывает диалог
             # 3. постусловие: пакетная проверка по копии (диалог закрыт раннером)
             deadline = _t.time() + 30
