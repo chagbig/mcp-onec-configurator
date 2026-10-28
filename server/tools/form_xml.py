@@ -17,8 +17,6 @@
 П3 28.10.2026: запись через живой редактор (form_import) НЕ работает — буфер
 редактора изолирован от конфигурации; поэтому /LoadCfg (docs/stage-08-forms.md §4.3).
 """
-import json
-import re
 import shutil
 import subprocess
 import sys
@@ -234,16 +232,25 @@ def form_set_xml(session: int, obj_path: str, form_name: str, owner_path: str,
     cf2 = work / "cf2.cf"
     _designer(["/F", str(twrite), "/DumpCfg", str(cf2)],
               work / "dumpcf.log", work / "dumpcf.res")
-    # запись в живую базу: конфигуратор(ы) закрываются (isModified=false выше)
-    _kill_session(bridge, pid, base)
-    _designer_retry(["/F", str(base), "/LoadCfg", str(cf2)],
-                    work / "loadlive.log", work / "loadlive.res")
-    _designer_retry(["/F", str(base), "/UpdateDBCfg"],
-                    work / "updlive.log", work / "updlive.res")
+    # запись в живую базу: конфигуратор(ы) закрываются (isModified=false выше).
+    # Если пакетный шаг упал — восстанавливаем сессию: без неё пользователь без
+    # конфигуратора, а база при отказе /LoadCfg не тронута (загрузка атомарна).
+    try:
+        _kill_session(bridge, pid, base)
+        _designer_retry(["/F", str(base), "/LoadCfg", str(cf2)],
+                        work / "loadlive.log", work / "loadlive.res")
+        _designer_retry(["/F", str(base), "/UpdateDBCfg"],
+                        work / "updlive.log", work / "updlive.res")
+    except FormXmlError:
+        try:
+            _relaunch(base)
+        except FormXmlError:
+            pass  # исходная ошибка важнее
+        raise
     new_pid = _relaunch(base)
     # верификация: свежий cf живой базы, текст формы == cf2 (нормализованные)
     from cf_inspect import CfFile
-    from form_text import texts_equal
+    from form_text import texts_equal, load_form_text
     key = form_uuid.strip("{}").lower() + ".0"
     cfv = _arch_cf(bridge, new_pid, "mcp-formxml-" + _stamp() + "-v.cf")
     with CfFile(str(cfv)) as c:
@@ -252,6 +259,14 @@ def form_set_xml(session: int, obj_path: str, form_name: str, owner_path: str,
         cf2_text = c.read({r["name"]: r for r in c.records()}[key]).decode("utf-8-sig")
     if not texts_equal(cfv_text, cf2_text):
         raise FormXmlError("верификация: cf живой базы ≠ cf2 по тексту формы")
+    # (б) живой редактор: form_save содержит признак правки (§3.2, дёшево — без круга)
+    if edit_marker:
+        live = bridge.call(new_pid, "form_save",
+                           {"path": f"{obj_path}.Форма.{form_name}" if form_name else obj_path,
+                            "prop": "Форма", "file": "formxml-verify.txt"}, timeout=120)
+        live_text = load_form_text(live["file"])
+        if edit_marker not in live_text:
+            raise FormXmlError("верификация (б): правки нет в живом form_save")
     return {"cf2": str(cf2), "verify_cf": str(cfv), "new_session": new_pid,
             "form_uuid": form_uuid, "ms": round((time.time() - t0) * 1000)}
 
@@ -313,9 +328,6 @@ def _designer_retry(args, log, res, timeout=1800, attempts=3):
                 raise
             time.sleep(20)  # файлы базы ещё отпускаются после kill
     raise last
-
-
-    raise FormXmlError(f"конфигуратор на {base} не поднялся за {timeout} с")
 
 
 def _relaunch(base: Path, timeout=180) -> int:

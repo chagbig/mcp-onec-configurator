@@ -345,6 +345,34 @@ class TestCfInspect(unittest.TestCase):
         import cf_inspect as ci
         self.assertIsNone(ci._header_name(b"root\x00\x00"))
 
+    def test_chained_toc_walked_sequentially(self) -> None:
+        """TOC-страница с нетерминальным next не срывает обход (cf 2 ГБ, 28.10)."""
+        import io
+        import cf_inspect as ci
+        name = "40916224-d255-42af-a76d-ff676ac881eb"
+        hdr = bytes(16) + bytes(5) + name.encode("utf-16-le") + bytes(4)
+        b1 = (b"\r\n" + b"00000020 00000020 00001000 " + b"\r\n" + b"X" * 32)
+        d1 = b"\r\n" + ("%08x %08x %08x" % (len(hdr), 128, 0x7fffffff)).encode() + b" \r\n"
+        buf = io.BytesIO()
+        buf.write(ci.OUTER_MAGIC + bytes(10))
+        buf.write(b1)
+        buf.write(d1)
+        buf.write(hdr + bytes(128 - len(hdr)))
+        buf.write(b"\r\n" + b"00000008 00000008 7fffffff " + b"\r\n" + b"Y" * 8)
+        c = ci.Container(buf, 16)
+        out = []
+        pending = None
+        for blk in c.walk():
+            pay, comp = c.payload(blk)
+            nm = ci._header_name(pay) if not comp else None
+            if nm:
+                pending = nm
+            elif pending:
+                out.append(pending)
+                pending = None
+        self.assertEqual(out, [name])
+
+
 
 class TestServerBuild(unittest.TestCase):
     def test_all_tools_registered(self) -> None:
