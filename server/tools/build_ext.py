@@ -208,8 +208,12 @@ def main(argv=None) -> int:
             stem = parts[1].replace(".xml", "").replace(".bsl", "")
             return CATALOG[parts[0]] + "." + stem
         return None
+    # владельцы: изменённые файлы + НОВЫЕ .bsl/Form.xml (модуль стал непустым,
+    # добавлена форма существующего объекта — П14-5мод 28.10.2026)
     changed_owners = sorted({owner_of(e["path"]) for e in fd["changed"]
-                             if owner_of(e["path"])})
+                             if owner_of(e["path"])} |
+                            {owner_of(f) for f in fd["only2"]
+                             if owner_of(f) and (f.endswith(".bsl") or f.endswith("Form.xml"))})
     step("владельцы изменённого", bool(changed_owners) or not fd["changed"],
          "%d шт: %s" % (len(changed_owners), changed_owners[:5]))
 
@@ -252,6 +256,39 @@ def main(argv=None) -> int:
         total_fill["inserted"] += r["inserted"]
     step("наполнение", True, "вставок=%d, маппинг=%d" %
          (total_fill["inserted"], len(total_fill["mapping"])))
+
+    # 4b. перехватчики изменённых модулей (ИзменениеИКонтроль; источник — cf2,
+    #     ловушка ГисМарк: собственный метод = имя оригинала висит клиент)
+    changed_paths = [e["path"] for e in fd["changed"]]
+    for path in changed_paths + list(fd["only2"]):
+        if not path.endswith(".bsl"):
+            continue
+        owner = owner_of(path)
+        if not owner or ".Форма." in path:
+            continue
+        kind, name = owner.split(".", 1)
+        CAT = {"Документ": "Document", "Справочник": "Catalog"}
+        mod_path = CAT.get(kind, kind) + "." + name + "." + (
+            "ObjectModule" if path.endswith("ObjectModule.bsl") else "ManagerModule")
+        # список экспортных процедур из исходника cf2 (источник перехватчика)
+        src_bsl = dump2 / path if not Path(path).is_absolute() else Path(path)
+        methods = re.findall(r"Процедура\s+(\w+)\(",
+                             src_bsl.read_text(encoding="utf-8-sig", errors="replace"), re.M)
+        if not methods:
+            step("перехватчик " + mod_path, True, "экспортных процедур нет")
+            continue
+        ok_all = True
+        for meth in methods:
+            m = _sh([sys.executable, str(SKILLS / "cfe-patch-method" / "scripts" / "cfe-patch-method.py"),
+                     "-ExtensionPath", str(src), "-ConfigPath", str(dump2),
+                     "-ModulePath", mod_path, "-MethodName", meth,
+                     "-InterceptorType", "ModificationAndControl"])
+            if "[OK]" not in m.stdout:
+                ok_all = False
+                step("перехватчик " + meth, False, (m.stdout + m.stderr)[-200:])
+        if not ok_all:
+            return 1
+    step("перехватчики модулей", True, "по экспортным процедурам изменённых .bsl")
 
     # 5. validate
     r = _sh([sys.executable, str(SKILLS / "cfe-validate" / "scripts" / "cfe-validate.py"),
