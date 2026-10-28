@@ -247,7 +247,39 @@ function typeToStr(v) {
 
 var OPS = {};
 
+// Разведка команд: перебор номеров группы ГЛОБАЛЬНЫМ getCmdState (не IV8View —
+// у дерева он слеп, этап 7). text отдаётся не для всех команд — пустые не включаем.
+OPS.cmd_scan_global = function (a) {
+    var grp = String(a.group || CFG_GROUP);
+    var from = (a.from === undefined) ? 0 : a.from, to = (a.to === undefined) ? 200 : a.to;
+    var out = [], errors = 0;
+    for (var n = from; n <= to; n++) {
+        var st = null, tx = null;
+        try { st = getCmdState(grp, n); } catch (e) { errors++; continue; }
+        if (!st) continue;
+        try { tx = safeStr(st.text); } catch (e2) {}
+        if ((st.enabled || st.checked || tx)) out.push({ num: n, enabled: st.enabled,
+            checked: st.checked, text: tx });
+    }
+    return { group: grp, from: from, to: to, errors: errors, found: out };
+};
+
 OPS.ping = function (a) { return { pong: true, bridge: BRIDGE_VERSION, pid: myPid }; };
+
+// Послать команду Config-группы из БЕЛОГО СПИСКА разведки окон (этап 13: поиск
+// «Расширения конфигурации»). Произвольные номера — отказ (инвариант «нет code
+// execution»); после отправки вызывающий сам проверяет окна/модалки.
+var CFG_CMD_WHITELIST = [35, 38, 41, 43, 45, 46];
+OPS.send_cfg_cmd = function (a) {
+    var num = a.num;
+    var allowed = false;
+    for (var i = 0; i < CFG_CMD_WHITELIST.length; i++) if (CFG_CMD_WHITELIST[i] === num) allowed = true;
+    if (!allowed) throw new Error("номер " + num + " вне белого списка разведки " + CFG_CMD_WHITELIST.join(","));
+    var st = getCmdState(CFG_GROUP, num);
+    if (!st || !st.enabled) throw new Error("команда " + num + " недоступна");
+    var sent = sendCommand(CFG_GROUP, num);
+    return { sent: sent, num: num };
+};
 
 OPS.session_info = function (a) {
     return { pid: myPid, conn: sessionBase.conn, platform: sessionBase.platform,
