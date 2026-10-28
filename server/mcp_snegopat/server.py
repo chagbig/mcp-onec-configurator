@@ -88,6 +88,17 @@ CONSTRUCTOR_BLOCKED: dict[str, str] = {
                     "конфигураторе вручную или в XML-контуре"),
 }
 
+def _session_base_path(bridge, session: int):
+    """Строка соединения сессии → путь базы (для пакетных вызовов)."""
+    for s in bridge.sessions():
+        if s.pid == session:
+            conn = str(s.data.get("conn") or "")
+            if "=" in conn:
+                value = conn.split("=", 1)[1].rstrip(';" ').strip('"')
+                return Path(value)
+    raise BridgeError("bad_args", f"сессия {session} не найдена")
+
+
 INSTRUCTIONS = """\
 Работа с ОТКРЫТЫМ конфигуратором 1С через мост Снегопата. Порядок:
 1) list_sessions — найти сессию (pid) и контейнер (индекс + identifier);
@@ -590,6 +601,80 @@ class Toolkit:
         except FormXmlError as e:
             raise BridgeError("form_xml", str(e))
 
+    # ---------- расширения (этап 13) ----------
+
+    def ext_list(self, session: int | None = None) -> dict:
+        """Расширения ЖИВОЙ сессии из session_info: container (индекс), identifier, root,
+        isModified. ВИДИМЫ ТОЛЬКО ОТКРЫТЫЕ (дерево расширения открыто); созданное и не
+        открытое расширение в списке НЕ появится (факт П1/П2, docs/stage-13-extensions.md).
+        Записи в расширение — только со свежим ext_list + container=N; в ответе период
+        heartbeat моста — не работайте по протухшему списку."""
+        si = self._call(session, "session_info", {})
+        exts = []
+        for c in si.get("containers", []):
+            ident = str(c.get("identifier") or "")
+            if "Расширение конфигурации" in ident and "(база данных)" not in ident:
+                exts.append({"container": c.get("index"), "identifier": ident,
+                             "root": str(c.get("root") or ""),
+                             "isModified": c.get("isModified"),
+                             "isCurrent": c.get("isCurrent")})
+        return {"extensions": exts, "heartbeatAge_s": si.get("heartbeatAge_s")}
+
+    def ext_dump_cfe(self, session: int, name: str, file: str, base_path: str = "") -> dict:
+        """Выгрузить СОХРАНЁННОЕ расширение в .cfe пакетно (/DumpCfg -Extension).
+        Требования: расширение в ext_list с isModified=false (cfe снимает только
+        сохранённое); file — [A-Za-z0-9_.-].cfe; base_path — база-источник (по умолчанию
+        база сессии; пакетный вызов открывает независимое соединение — на занятой базе
+        возможен отказ, тогда скопируйте базу). Загрузка в слот: mockup_init +
+        /LoadCfg <file> -Extension <name> (docs/stage-13-extensions.md §9)."""
+        import re as _re
+        import subprocess as _sp
+        import os as _os
+        if not _re.fullmatch(r"[A-Za-z0-9_.\-]+\.cfe", file):
+            raise BridgeError("bad_args", "file: [A-Za-z0-9_.-].cfe")
+        exts = self.ext_list(session=session).get("extensions", [])
+        mine = [e for e in exts if name in (e.get("root") or "") or name in (e.get("identifier") or "")]
+        if not mine:
+            raise BridgeError("bad_args",
+                              f"расширение «{name}» не найдено среди открытых (ext_list)")
+        if any(e.get("isModified") for e in mine):
+            raise BridgeError("bad_args",
+                              "расширение изменено (isModified=true) — сохраните сначала: "
+                              "cfe снимает только сохранённое состояние")
+        base = base_path or str(_session_base_path(self.bridge, session))
+        out = r"Y:\Snegopat-mcp\backups\ext-%s" % file
+        # пакетный вызов на базе, открытой живым конфигуратором, падает
+        # «1Cv8.cdn. Схема не зарегистрирована» (28.10.2026) — работаем по КОПИИ базы
+        # (1Cv8.1CD + служебные; занятые 1Cv8.cgr/1Cv8Log и .cfl пропускаются)
+        import shutil as _sh
+        work_base = r"Y:\Snegopat-mcp\temp\extdump-base"
+        _sh.rmtree(work_base, ignore_errors=True)
+        _os.makedirs(work_base, exist_ok=True)
+        copied = []
+        for _f in _os.listdir(base):
+            if _f in ("1Cv8.cgr", "1Cv8Log") or _f.endswith(".cfl"):
+                continue
+            _s = _os.path.join(base, _f)
+            if _os.path.isfile(_s):
+                _sh.copy2(_s, _os.path.join(work_base, _f))
+                copied.append(_f)
+        if "1Cv8.1CD" not in copied:
+            raise BridgeError("ext_dump_failed", "1Cv8.1CD базы скопировать не удалось (занят?)")
+        r = _sp.run([r"C:\Program Files\1cv8\8.3.27.2074\bin\1cv8.exe", "DESIGNER", "/DisableStartupDialogs",
+                     "/F", work_base, "/DumpCfg", out, "-Extension", name,
+                     "/Out", out + ".log", "/DumpResult", out + ".res"],
+                    capture_output=True, timeout=600)
+        res = ""
+        try:
+            res = open(out + ".res", encoding="utf-8-sig", errors="replace").read().strip()
+        except OSError:
+            pass
+        if r.returncode != 0 or res not in ("0", ""):
+            raise BridgeError("ext_dump_failed", f"rc={r.returncode}, res={res}")
+        if not _os.path.isfile(out) or _os.path.getsize(out) == 0:
+            raise BridgeError("ext_dump_failed", "cfe не создан")
+        return {"file": out, "size": _os.path.getsize(out), "res": res}
+
     # ---------- служебное ----------
 
     def tree_activate(self, session: int | None = None, container: int | None = None,
@@ -765,6 +850,7 @@ _TOOLS = [
     "config_open", "cfg_archive_cf", "config_save", "syntax_check", "update_db_cfg",
     "cfgstore_capture", "cfgstore_commit",
     "form_export", "form_import", "form_get_xml", "form_set_xml",
+    "ext_list", "ext_dump_cfe",
     "tree_activate", "tree_activate_group", "dialog_probe",
     "bridge_wait", "bridge_stats", "focus_probe",
 ]
