@@ -374,6 +374,38 @@ class TestCfInspect(unittest.TestCase):
 
 
 
+class TestFormXmlCacheHelpers(unittest.TestCase):
+    """Кэш М2: идентичность cf и маркер temp_read (form_xml)."""
+
+    def test_cf_key_identity(self) -> None:
+        import time as _t
+        from form_xml import _cf_key
+        with tempfile.TemporaryDirectory() as d:
+            a = Path(d) / "a.cf"
+            a.write_bytes(b"x" * 10)
+            _t.sleep(0.02)
+            b = Path(d) / "b.cf"
+            b.write_bytes(b"x" * 10)
+            self.assertEqual(_cf_key(a), _cf_key(a))
+            self.assertNotEqual(_cf_key(a), _cf_key(b))
+
+    def test_tread_marker_roundtrip(self) -> None:
+        from form_xml import _read_tread_marker, _tread_reusable, _write_tread_marker
+        with tempfile.TemporaryDirectory() as d:
+            cf = Path(d) / "mcp-x.cf"
+            cf.write_bytes(b"y" * 20)
+            work = Path(d) / "work"
+            work.mkdir()
+            self.assertFalse(_tread_reusable(work, cf))  # маркера нет
+            _write_tread_marker(work, cf)
+            self.assertIsNotNone(_read_tread_marker(work))
+            self.assertTrue(_tread_reusable(work, cf))
+            # другой cf (размер) — маркер не подходит
+            cf2 = Path(d) / "mcp-y.cf"
+            cf2.write_bytes(b"y" * 21)
+            self.assertFalse(_tread_reusable(work, cf2))
+
+
 class TestServerBuild(unittest.TestCase):
     def test_all_tools_registered(self) -> None:
         import asyncio

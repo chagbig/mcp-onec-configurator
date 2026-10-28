@@ -537,21 +537,25 @@ class Toolkit:
 
     def form_get_xml(self, session: int, obj_path: str, form_name: str = "",
                      owner_path: str = "", cf_path: str = "",
-                     temp_base: str = "") -> dict:
+                     temp_base: str = "", cf_max_age_s: float = 0) -> dict:
         """XML формы из cf последнего сохранённого состояния (этап 8 §3.1). ТЯЖЁЛОЕ:
         минуты (cf конфигурации + temp-база). obj_path — владелец («Справочник.X» /
         «ОбщаяФорма.X»); form_name — имя формы («ФормаЭлемента», пусто для общей);
         owner_path — для снимка состава К2 (по умолчанию obj_path); cf_path — готовый
         cf (иначе снимается свежий); temp_base — готовая temp-база из этого cf (иначе
-        строится). При isModified=true — ОТКАЗ (несохранённые правки, К1).
-        Ответ: xml, snapshot (передайте в form_set_xml), form_uuid, cf, ms."""
+        строится); cf_max_age_s — переиспользовать архив из кэша, если моложе (0 =
+        всегда свежий). Кэш М2: повторное чтение той же формы — мгновенно (XML по
+        хешу записи cf); temp_read переиспользуется для того же cf. При
+        isModified=true — ОТКАЗ (несохранённые правки, К1).
+        Ответ: xml, snapshot (передайте в form_set_xml), form_uuid, cache, cf, ms."""
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
         from form_xml import form_get_xml as _impl, FormXmlError
         try:
             return _impl(session, obj_path, form_name,
                          owner_path or obj_path,
                          cf_path or None,
-                         temp_base=Path(temp_base) if temp_base else None)
+                         temp_base=Path(temp_base) if temp_base else None,
+                         cf_max_age_s=cf_max_age_s)
         except FormXmlError as e:
             raise BridgeError("form_xml", str(e))
 

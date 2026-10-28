@@ -17,6 +17,9 @@
 П3 28.10.2026: запись через живой редактор (form_import) НЕ работает — буфер
 редактора изолирован от конфигурации; поэтому /LoadCfg (docs/stage-08-forms.md §4.3).
 """
+import hashlib
+import json
+import os
 import shutil
 import subprocess
 import sys
@@ -38,6 +41,7 @@ _spec.loader.exec_module(mtl)
 PLATFORM = mtl.PLATFORM
 LOGS = Path(r"Y:\Snegopat-mcp\logs")
 WORK = Path(r"Y:\Snegopat-mcp\verify\form_xml")
+CACHE = Path(r"Y:\Snegopat-mcp\cache\formxml")
 
 
 class FormXmlError(Exception):
@@ -122,32 +126,131 @@ def _form_uuid(bridge: Bridge, pid: int, obj_path: str, form_name: str) -> str:
     raise FormXmlError(f"форма {form_name} у {obj_path} не найдена")
 
 
+def _cf_key(cf: Path) -> str:
+    """Идентичность cf-снимка: имя + размер + mtime_ns. Файлы-архивы создаются
+    один раз и не меняются — пара (размер, mtime) однозначно опознаёт снимок,
+    полный sha1 2 ГБ не читаем."""
+    st = cf.stat()
+    return "%s-%d-%d" % (cf.stem, st.st_size, st.st_mtime_ns)
+
+
+def _read_tread_marker(work: Path) -> dict | None:
+    try:
+        return json.loads((work / "tread.cf.json").read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _write_tread_marker(work: Path, cf: Path) -> None:
+    st = cf.stat()
+    (work / "tread.cf.json").write_text(
+        json.dumps({"cf": str(cf), "size": st.st_size, "mtime_ns": st.st_mtime_ns},
+                   ensure_ascii=False), encoding="utf-8")
+
+
+def _tread_reusable(work: Path, cf: Path) -> bool:
+    m = _read_tread_marker(work)
+    if not m:
+        return False
+    st = cf.stat()
+    return m.get("size") == st.st_size and m.get("mtime_ns") == st.st_mtime_ns
+
+
+def _cf_registry_path() -> Path:
+    return CACHE / "cf_registry.json"
+
+
+def _cf_registry_get(base: Path) -> dict | None:
+    try:
+        return json.loads(_cf_registry_path().read_text(encoding="utf-8")).get(
+            mtl.norm_file_key(base))
+    except Exception:
+        return None
+
+
+def _cf_registry_put(base: Path, cf: Path) -> None:
+    p = _cf_registry_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        reg = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        reg = {}
+    reg[mtl.norm_file_key(base)] = {"cf": str(cf), "ts": time.time()}
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(reg, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, p)
+
+
+def _get_cf(bridge: Bridge, pid: int, base: Path, cf_path: str | None,
+            cf_max_age_s: float) -> tuple[Path, str]:
+    """cf для чтения: переданный, либо кэш по времени (моложе cf_max_age_s),
+    либо свежий архив (факт пишется в реестр для последующих чтений)."""
+    if cf_path:
+        return Path(cf_path), "given"
+    if cf_max_age_s > 0:
+        ent = _cf_registry_get(base)
+        if ent:
+            p = Path(ent["cf"])
+            if p.is_file():
+                age = time.time() - float(ent["ts"])
+                if age <= cf_max_age_s:
+                    return p, "cf-cache (%.0f с)" % age
+    cf = _arch_cf(bridge, pid, "mcp-formxml-" + _stamp() + ".cf")
+    _cf_registry_put(base, cf)
+    return cf, "fresh"
+
+
+def _form_record_sha1(cf: Path, form_uuid: str) -> str:
+    """Хеш записи формы в cf (неизменяемый снимок) — ключ XML-кэша М2."""
+    from cf_inspect import CfFile
+    key = form_uuid.strip("{}").lower() + ".0"
+    with CfFile(str(cf)) as c:
+        data = c.read({r["name"]: r for r in c.records()}[key])
+    return hashlib.sha1(data).hexdigest()
+
+
 def form_get_xml(session: int, obj_path: str, form_name: str, owner_path: str,
                  cf_path: str | None = None, base_dir: Path | None = None,
-                 temp_base: Path | None = None) -> dict:
+                 temp_base: Path | None = None, cf_max_age_s: float = 0) -> dict:
     """§3.1: XML формы из cf последнего сохранённого состояния.
 
     obj_path — владелец («Справочник.Номенклатура» или «ОбщаяФорма.X»);
     form_name — имя формы («ФормаЭлемента», «» для самой общей формы);
     owner_path — путь владельца для снимка К2 (для общей формы = сам объект);
-    temp_base — готовая temp-база из этого же cf (иначе строится в work/tread).
+    temp_base — готовая temp-база из этого же cf (иначе строится в work/tread);
+    cf_max_age_s — переиспользовать архив cf этого основания, если он моложе
+    (0 = всегда снимать свежий; cf страдает 129 с на 2 ГБ).
+    Кэш М2: XML ищется по хешу записи формы в cf — hit возвращает без temp_read
+    (записи cf неизменяемы, инвалидация не нужна); temp_read переиспользуется
+    для того же cf (маркер размер+mtime).
     """
     t0 = time.time()
     cfg = load_config()
     bridge = Bridge(cfg)
-    pid = session_for_base(bridge, _session_base(bridge, session))
+    base = _session_base(bridge, session)
+    pid = session_for_base(bridge, base)
     if _modified(bridge, pid):
         raise FormXmlError(
             "контейнер изменён (isModified=true) — есть несохранённые правки; "
             "чтение отражает только сохранённое состояние (§3.1, К1)")
     snap = snapshot_owner(bridge, pid, owner_path)
     form_uuid = _form_uuid(bridge, pid, obj_path, form_name)
-    cf = Path(cf_path) if cf_path else _arch_cf(bridge, pid, "mcp-formxml-" + _stamp() + ".cf")
-    work = (base_dir or WORK) / cf.stem
+    cf, cf_src = _get_cf(bridge, pid, base, cf_path, cf_max_age_s)
+    record_hash = _form_record_sha1(cf, form_uuid)
+    xml_cache = CACHE / "xml" / (record_hash + ".xml")
+    if xml_cache.is_file():
+        return {"xml": xml_cache.read_text(encoding="utf-8-sig"),
+                "xml_path": str(xml_cache), "cf": str(cf), "cf_source": cf_src,
+                "snapshot": snap, "full_name": obj_path if not form_name else f"{obj_path}.Форма.{form_name}",
+                "form_uuid": form_uuid, "record_sha1": record_hash,
+                "cache": "xml-hit", "ms": round((time.time() - t0) * 1000)}
+    work = (base_dir or WORK) / _cf_key(cf)
     work.mkdir(parents=True, exist_ok=True)
     tread = temp_base if temp_base is not None else work / "tread"
-    if temp_base is None:
+    reusable = temp_base is None and _tread_reusable(work, cf)
+    if temp_base is None and not reusable:
         _mockup_init(tread, cf)
+        _write_tread_marker(work, cf)
     full_name = obj_path if not form_name else f"{obj_path}.Форма.{form_name}"
     lf = work / "dump.list"
     lf.write_text(full_name + "\n", encoding="utf-8")
@@ -160,8 +263,11 @@ def form_get_xml(session: int, obj_path: str, form_name: str, owner_path: str,
     if len(xmls) != 1:
         raise FormXmlError(f"ожидался Form.xml, найдено {len(xmls)}: {xmls}")
     xml = xmls[0].read_text(encoding="utf-8-sig")
-    return {"xml": xml, "xml_path": str(xmls[0]), "cf": str(cf),
+    xml_cache.parent.mkdir(parents=True, exist_ok=True)
+    xml_cache.write_text(xml, encoding="utf-8")
+    return {"xml": xml, "xml_path": str(xmls[0]), "cf": str(cf), "cf_source": cf_src,
             "snapshot": snap, "full_name": full_name, "form_uuid": form_uuid,
+            "record_sha1": record_hash, "cache": "temp-reuse" if reusable else "miss",
             "ms": round((time.time() - t0) * 1000)}
 
 
