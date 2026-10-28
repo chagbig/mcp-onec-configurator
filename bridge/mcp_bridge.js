@@ -266,19 +266,25 @@ OPS.cmd_scan_global = function (a) {
 
 OPS.ping = function (a) { return { pong: true, bridge: BRIDGE_VERSION, pid: myPid }; };
 
-// Послать команду Config-группы из БЕЛОГО СПИСКА разведки окон (этап 13: поиск
-// «Расширения конфигурации»). Произвольные номера — отказ (инвариант «нет code
-// execution»); после отправки вызывающий сам проверяет окна/модалки.
+// Послать команду из БЕЛОГО СПИСКА разведки/этапа 13 (поиск окон расширений,
+// заимствование Frntend,271 «Добавить в расширение»). Произвольные номера —
+// отказ (инвариант «нет code execution»); вызывающий сам проверяет окна/модалки.
 var CFG_CMD_WHITELIST = [35, 38, 41, 43, 45, 46];
+var FRNT_GROUP = "{6B7291BF-BCD2-41AF-BAC7-414D47CC6E6A}";
 OPS.send_cfg_cmd = function (a) {
-    var num = a.num;
-    var allowed = false;
-    for (var i = 0; i < CFG_CMD_WHITELIST.length; i++) if (CFG_CMD_WHITELIST[i] === num) allowed = true;
-    if (!allowed) throw new Error("номер " + num + " вне белого списка разведки " + CFG_CMD_WHITELIST.join(","));
-    var st = getCmdState(CFG_GROUP, num);
-    if (!st || !st.enabled) throw new Error("команда " + num + " недоступна");
-    var sent = sendCommand(CFG_GROUP, num);
-    return { sent: sent, num: num };
+    var num = a.num, grp = CFG_GROUP;
+    if (a.group === "frnt") {
+        grp = FRNT_GROUP;
+        if (num !== 271) throw new Error("Frntend: в белом списке только 271 (Добавить в расширение)");
+    } else {
+        var allowed = false;
+        for (var i = 0; i < CFG_CMD_WHITELIST.length; i++) if (CFG_CMD_WHITELIST[i] === num) allowed = true;
+        if (!allowed) throw new Error("номер " + num + " вне белого списка разведки " + CFG_CMD_WHITELIST.join(","));
+    }
+    var st = getCmdState(grp, num);
+    if (!st || !st.enabled) throw new Error("команда недоступна: " + grp.slice(1, 9) + "/" + num);
+    var sent = sendCommand(grp, num);
+    return { sent: sent, num: num, group: grp };
 };
 
 OPS.session_info = function (a) {
