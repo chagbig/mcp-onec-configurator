@@ -986,7 +986,16 @@ OPS.md_add_child = function (a) {
     if (a.requireTree) {
         var av = null; try { av = windows.getActiveView(); } catch (e) {}
         var avTitle = av ? safeStr(av.title) : null;
-        if (!avTitle || String(avTitle).indexOf("Конфигурация") != 0) throw new Error("фокус не в дереве метаданных: активно «" + avTitle + "»");
+        var isMainTree = avTitle && String(avTitle).indexOf("Конфигурация") == 0;
+        // дерево расширения имеет заголовок = отображаемое имя расширения; для
+        // операций в расширении (container задан) разрешаем любой заголовок, КРОМЕ
+        // дерева основной конфигурации — уход Insert/Delete в основное дерево =
+        // порча (этап 13, ревью М-6); неверное расширение отсекает uuid-инвариант
+        var extMode = (a.container !== undefined && a.container !== null);
+        if (a.requireTree && !extMode && (!avTitle || !isMainTree))
+            throw new Error("фокус не в дереве метаданных: активно «" + avTitle + "»");
+        if (extMode && isMainTree)
+            throw new Error("фокус в дереве ОСНОВНОЙ конфигурации при операции в расширении — отказ (М-6)");
     }
     addCapture = { events: [], modals: [], modalPolicy: a.modalPolicy || "cancel", wizard: a.wizard || null };
     var sent = false, hwnd = 0;
@@ -1074,7 +1083,12 @@ OPS.md_delete = function (a) {
     if (a.requireTree) {
         var av = null; try { av = windows.getActiveView(); } catch (e) {}
         var avTitle = av ? safeStr(av.title) : null;
-        if (!avTitle || String(avTitle).indexOf("Конфигурация") != 0) throw new Error("фокус не в дереве метаданных: активно «" + avTitle + "»");
+        var isMainTree = avTitle && String(avTitle).indexOf("Конфигурация") == 0;
+        var extMode = (a.container !== undefined && a.container !== null);
+        if (!extMode && (!avTitle || !isMainTree))
+            throw new Error("фокус не в дереве метаданных: активно «" + avTitle + "»");
+        if (extMode && isMainTree)
+            throw new Error("фокус в дереве ОСНОВНОЙ конфигурации при операции в расширении — отказ (М-6)");
     }
     delCapture = { boxes: [], modals: [], md: [], refused: [] };
     a_delModalAllowed = a.allowModals || [];
@@ -1412,15 +1426,15 @@ OPS.mouse_click = function (a) {
     throw new Error("mouse_click недоступен: DynamicWrapperX в системе не установлен (26.10.2026)");
 };
 
-// Клавиша в окно фокуса для редактора объекта: только Insert (добавить в гриде данных).
-// Вызов корректен ТОЛЬКО после view_activate (фокус в окне редактора, не в дереве —
-// иначе клавиша уйдёт в дерево метаданных!)
+// Клавиша в окно фокуса: Insert (добавить в гриде данных), Enter (открыть в
+// менеджере расширений, этап 13), PgUp/PgDn. Вызов корректен ТОЛЬКО после
+// view_activate (фокус в нужном окне, не в дереве — иначе клавиша уйдёт в дерево!)
 OPS.key_send = function (a) {
     var keys = (a.keys && a.keys.length) ? a.keys : [a.key];
     for (var i = 0; i < keys.length; i++) {
         var key = keys[i];
-        var okKey = (key === 0x2D) || (key === 0x21) || (key === 0x22); // Ins, PgUp, PgDn
-        if (!okKey) throw new Error("разрешены Ins/PgUp/PgDn, получено " + key);
+        var okKey = (key === 0x2D) || (key === 0x21) || (key === 0x22) || (key === 0x0D);
+        if (!okKey) throw new Error("разрешены Ins/PgUp/PgDn/Enter, получено " + key);
     }
     var av = null; try { av = windows.getActiveView(); } catch (e0) {}
     var t = av ? safeStr(av.title) : null;

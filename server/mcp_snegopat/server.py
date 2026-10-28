@@ -723,15 +723,23 @@ class Toolkit:
     def _focus_tree(self, pid: int, container: int | None, path: str | None) -> None:
         from . import winutils
         winutils.activate_window(pid, wait_s=1.0)  # best-effort снаружи
+        # дерево расширения имеет заголовок = отображаемое имя расширения: для
+        # неосновного контейнера принимаем ЛЮБОЙ заголовок, кроме дерева основной
+        # конфигурации (этап 13, М-6 — уход клавиш в основное дерево = порча)
+        ext_mode = container is not None and container > 0
         title = None
         for _ in range(3):
             self.bridge.call(pid, "tree_activate", self._a(container, path=path))
             av = self.bridge.call(pid, "active_view", {})
             title = (av or {}).get("title")
-            if title and str(title).startswith("Конфигурация"):
+            if title and (str(title).startswith("Конфигурация") or
+                          (ext_mode and not str(title).startswith("Конфигурация"))):
                 break
         else:
             raise BridgeError("no_tree_focus", f"фокус не в дереве метаданных: активно «{title}»")
+        if ext_mode and title and str(title).startswith("Конфигурация"):
+            raise BridgeError("no_tree_focus",
+                              "фокус в дереве ОСНОВНОЙ конфигурации при операции в расширении")
         # активация изнутри процесса (SendKeys+AppActivate) — цикл сообщений доставит
         # фокус между тиками; ждём подтверждения
         for _ in range(8):
