@@ -99,6 +99,31 @@ def _session_base_path(bridge, session: int):
     raise BridgeError("bad_args", f"сессия {session} не найдена")
 
 
+def _ext_exists_packed(base, name: str) -> bool:
+    """Есть ли расширение с именем name в базе base — пакетно, по КОПИИ базы
+    (пакетный вызов на живой базе падает «1Cv8.cdn»; 28.10.2026)."""
+    import subprocess as _sp
+    import os as _os
+    import shutil as _sh
+    base = str(base)
+    work = "Y:/Snegopat-mcp/temp/extcheck-base"
+    _sh.rmtree(work, ignore_errors=True)
+    _os.makedirs(work, exist_ok=True)
+    for _f in _os.listdir(base):
+        if _f in ("1Cv8.cgr", "1Cv8Log") or _f.endswith(".cfl"):
+            continue
+        _s = _os.path.join(base, _f)
+        if _os.path.isfile(_s):
+            _sh.copy2(_s, _os.path.join(work, _f))
+    probe = work + "\\extcheck-out.cfe"
+    r = _sp.run([r"C:\Program Files\1cv8\8.3.27.2074\bin\1cv8.exe", "DESIGNER",
+                 "/DisableStartupDialogs", "/F", work,
+                 "/DumpCfg", probe, "-Extension", name,
+                 "/Out", work + "\\extcheck.log", "/DumpResult", work + "\\extcheck.res"],
+                capture_output=True, timeout=300)
+    return _os.path.isfile(probe) and _os.path.getsize(probe) > 0
+
+
 INSTRUCTIONS = """\
 Работа с ОТКРЫТЫМ конфигуратором 1С через мост Снегопата. Порядок:
 1) list_sessions — найти сессию (pid) и контейнер (индекс + identifier);
@@ -675,6 +700,96 @@ class Toolkit:
             raise BridgeError("ext_dump_failed", "cfe не создан")
         return {"file": out, "size": _os.path.getsize(out), "res": res}
 
+    def ext_save(self, session: int, name: str) -> dict:
+        """Сохранить расширение (штатное «Сохранить документ» при активном дереве
+        расширения — Frame.FileSave). Проверено живьём (28.10.2026): isModified → False,
+        правки попадают в cfe. Дерево расширения должно быть открыто (ext_list);
+        перед сохранением правки агента — снимите cfe-точку отката (ext_dump_cfe)."""
+        exts = self.ext_list(session=session).get("extensions", [])
+        mine = [e for e in exts if name in (e.get("root") or "") or name in (e.get("identifier") or "")]
+        if not mine:
+            raise BridgeError("bad_args", f"расширение «{name}» не найдено среди открытых (ext_list)")
+        title = mine[0]["identifier"].replace("Расширение конфигурации ", "").strip('"')
+        self._call(session, "view_activate", {"title": title})
+        r = self._call(session, "editor_commit", {"title": title, "num": 4})
+        import time as _t
+        _t.sleep(2)
+        after = {e["root"]: e["isModified"] for e in self.ext_list(session=session)["extensions"]}
+        if after.get(name, True):
+            raise BridgeError("ext_save_failed", "isModified не сброшен после сохранения")
+        return r
+
+    def ext_create(self, session: int, name: str, prefix: str, synonym: str = "",
+                   purpose: int = 1) -> dict:
+        """Создать расширение: менеджер «Расширения конфигурации» → Ins → диалог
+        (НЕмодальный) заполняет мастер-раннер по флаг-файлу → ОК (механика П2).
+        ПРЕДУСЛОВИЕ: окно менеджера закрыто ИЛИ открыто без выделенной строки —
+        раннер сработает на ОТКРЫТИИ диалога. Постусловие: расширение существует —
+        пакетная проверка по КОПИИ базы (/DumpCfg -Extension; факт П1: созданное и
+        не открытое расширение в openedCount НЕ появляется). ПОВТОРНЫЙ Ins при
+        существующем имени даёт неуправляемую модалку «не уникально» (М-5) —
+        существование проверяется ДО отправки Ins."""
+        import json as _json
+        import subprocess as _sp
+        import os as _os
+        import time as _t
+        base = str(_session_base_path(self.bridge, session))
+        # 1. негатив: расширение уже есть? (пакетная проверка по копии)
+        if _ext_exists_packed(base, name):
+            raise BridgeError("bad_args", f"расширение «{name}» уже есть в базе")
+        # 2. флаг мастер-раннера на диалог «Новое расширение конфигурации»
+        flag = r"Y:\Snegopat-mcp\mcp\mcp_stg_wizard.json"
+        job = {"dialogs": [{"caption": "Новое расширение конфигурации", "steps": [
+            {"set": {"EditName": name, "EditPrefix": prefix, "EditSynonym": synonym,
+                     "EditUsePurpose": purpose},
+             "report": ["EditName", "EditPrefix", "EditSynonym", "EditUsePurpose"]},
+            {"click": "OkButton"}]}]}
+        tmp = flag + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(_json.dumps(job, ensure_ascii=False, indent=1))
+        _os.replace(tmp, flag)
+        try:
+            self._call(session, "view_activate", {"title": "Расширения конфигурации"})
+            self._call(session, "key_send", {"key": 0x2D})  # Ins — открывает диалог
+            # 3. постусловие: пакетная проверка по копии (диалог закрыт раннером)
+            deadline = _t.time() + 30
+            ok = False
+            while _t.time() < deadline and not ok:
+                _t.sleep(3)
+                try:
+                    ok = _ext_exists_packed(base, name)
+                except Exception:
+                    ok = False
+            if not ok:
+                raise BridgeError("ext_create_failed",
+                                  "расширение не создано за 30 с — проверьте wizard.log/модалки "
+                                  "(повторный Ins при существующем имени даёт зомби-модалку)")
+            return {"created": name, "verified": "packed-check"}
+        finally:
+            _os.replace(flag + ".clean", flag) if _os.path.isfile(flag + ".clean") else None
+            with open(flag, "w", encoding="utf-8") as f:
+                f.write(_json.dumps({"dialogs": []}))
+            _os.remove(tmp) if _os.path.isfile(tmp) else None
+
+    def ext_open(self, session: int, name: str) -> dict:
+        """Открыть дерево расширения (контейнер появится в session_info): менеджер →
+        Enter на выделенной строке. ОГРАНИЧЕНИЕ (М-4/факт П1): мост не умеет выделять
+        строку грида менеджера по имени — работает только когда расширение УЖЕ
+        выделено (единственное созданное/последнее созданное). Постусловие: контейнер
+        с root==name в session_info."""
+        import time as _t
+        self._call(session, "view_activate", {"title": "Расширения конфигурации"})
+        self._call(session, "key_send", {"key": 0x0D})  # Enter
+        deadline = _t.time() + 20
+        while _t.time() < deadline:
+            _t.sleep(2)
+            for e in self.ext_list(session=session)["extensions"]:
+                if e["root"] == name:
+                    return {"opened": name, "container": e["container"]}
+        raise BridgeError("ext_open_failed",
+                          "контейнер не появился: строка расширения не была выделена в менеджере "
+                          "(выделите вручную либо откройте дерево вручную)")
+
     # ---------- служебное ----------
 
     def tree_activate(self, session: int | None = None, container: int | None = None,
@@ -850,7 +965,7 @@ _TOOLS = [
     "config_open", "cfg_archive_cf", "config_save", "syntax_check", "update_db_cfg",
     "cfgstore_capture", "cfgstore_commit",
     "form_export", "form_import", "form_get_xml", "form_set_xml",
-    "ext_list", "ext_dump_cfe",
+    "ext_list", "ext_dump_cfe", "ext_save", "ext_create", "ext_open",
     "tree_activate", "tree_activate_group", "dialog_probe",
     "bridge_wait", "bridge_stats", "focus_probe",
 ]

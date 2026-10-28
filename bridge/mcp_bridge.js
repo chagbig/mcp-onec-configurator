@@ -1439,8 +1439,8 @@ OPS.key_send = function (a) {
     var keys = (a.keys && a.keys.length) ? a.keys : [a.key];
     for (var i = 0; i < keys.length; i++) {
         var key = keys[i];
-        var okKey = (key === 0x2D) || (key === 0x21) || (key === 0x22) || (key === 0x0D);
-        if (!okKey) throw new Error("разрешены Ins/PgUp/PgDn/Enter, получено " + key);
+        var okKey = (key === 0x2D) || (key === 0x21) || (key === 0x22) || (key === 0x0D) || (key === 0x09);
+        if (!okKey) throw new Error("разрешены Ins/PgUp/PgDn/Enter/Tab, получено " + key);
     }
     var av = null; try { av = windows.getActiveView(); } catch (e0) {}
     var t = av ? safeStr(av.title) : null;
