@@ -19,6 +19,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from fake_bridge import FakeBridge  # noqa: E402
+
+def os_utime(p: Path, ts: float) -> None:
+    import os as _os
+    _os.utime(p, (ts, ts))
+
 from mcp_snegopat.bridge import Bridge, BridgeError, NoSessionError, fnv1a  # noqa: E402
 from mcp_snegopat.config import Config  # noqa: E402
 from mcp_snegopat.server import Toolkit, build_server  # noqa: E402
@@ -404,6 +409,70 @@ class TestFormXmlCacheHelpers(unittest.TestCase):
             cf2 = Path(d) / "mcp-y.cf"
             cf2.write_bytes(b"y" * 21)
             self.assertFalse(_tread_reusable(work, cf2))
+
+
+class TestFormXmlValidateAndGc(unittest.TestCase):
+    """Валидация XML до цепочки и retention тяжёлых каталогов (form_xml)."""
+
+    FORM_OK = ('<?xml version="1.0" encoding="UTF-8"?>'
+               '<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">'
+               '<AutoCommandBar name="" id="-1"/></Form>')
+
+    def test_validate_ok(self) -> None:
+        from form_xml import _validate_form_xml
+        _validate_form_xml(self.FORM_OK)
+
+    def test_validate_broken(self) -> None:
+        from form_xml import FormXmlError, _validate_form_xml
+        with self.assertRaises(FormXmlError) as cm:
+            _validate_form_xml(self.FORM_OK.replace("</Form>", "<Form>"))
+        self.assertIn("не разбирается", str(cm.exception))
+
+    def test_validate_wrong_root(self) -> None:
+        from form_xml import FormXmlError, _validate_form_xml
+        with self.assertRaises(FormXmlError) as cm:
+            _validate_form_xml('<?xml version="1.0"?><Other/>')
+        self.assertIn("корневой элемент", str(cm.exception))
+
+    def test_gc_work_keeps_newest_and_excludes_current(self) -> None:
+        import time as _t
+        from form_xml import _gc_work
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            old = []
+            for i in range(4):
+                p = root / ("w%d" % i)
+                p.mkdir()
+                (p / "f").write_text("x")
+                old_t = _t.time() - 7200 - i
+                os_utime(p, old_t)
+                old.append(p)
+            fresh = root / "fresh"
+            fresh.mkdir()
+            current = root / "current"
+            current.mkdir()
+            os_utime(current, _t.time() - 7200)
+            removed = _gc_work(root, keep=2, min_age_s=3600, exclude=current)
+            self.assertEqual(len(removed), 2)
+            self.assertTrue(fresh.is_dir() and current.is_dir())
+            self.assertEqual(len(list(root.iterdir())), 4)  # 2 старых + fresh + current
+
+    def test_gc_arch_cfs(self) -> None:
+        import time as _t
+        from form_xml import _gc_arch_cfs
+        with tempfile.TemporaryDirectory() as d:
+            b = Path(d)
+            f1 = b / "mcp-formxml-1.cf"
+            f1.write_bytes(b"x")
+            os_utime(f1, _t.time() - 7200)
+            f2 = b / "mcp-formxml-2.cf"
+            f2.write_bytes(b"x")
+            other = b / "other.cf"
+            other.write_bytes(b"x")
+            os_utime(other, _t.time() - 7200)
+            removed = _gc_arch_cfs(b, min_age_s=3600, extra_keep=f2)
+            self.assertEqual(removed, ["mcp-formxml-1.cf"])
+            self.assertTrue(f2.is_file() and other.is_file())
 
 
 class TestServerBuild(unittest.TestCase):

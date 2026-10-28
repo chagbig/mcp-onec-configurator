@@ -731,9 +731,70 @@ OPS.cfg_archive_cf = function (a) {
     return res;
 };
 
+// Загрузка cf штатной командой «Загрузить конфигурацию из файла» (Config, 6) —
+// этап 8 §3.2: запись cf2 в живую базу БЕЗ закрытия конфигуратора. Пакетный
+// /LoadCfg после kill упирался в «1Cv8.cdn. Схема не зарегистрирована» (окно
+// недоступности базы + зомби-конфигураторы, e2e 28.10.2026) — мостовая команда
+// снимает весь класс проблем: сессия не меняется, kill не нужен.
+var pendingLoad = null;
+function onSelectFileLoadMcp(fd) {
+    try {
+        if (!pendingLoad) return;
+        var ev = { mode: fd.mode, defExt: safeStr(fd.defExt), title: safeStr(fd.title), initial: safeStr(fd.initialFileName) };
+        pendingLoad.selectEvents.push(ev);
+        if (fd.mode == 0 && !pendingLoad.used) {   // диалог ОТКРЫТИЯ
+            fd.addSelectedFile(pendingLoad.path);
+            fd.result = 1;
+            pendingLoad.used = true;
+            ev.action = "подставлен путь";
+        } else {
+            fd.result = 2;
+            ev.action = "отмена (не наш диалог)";
+        }
+    } catch (e) { if (pendingLoad) pendingLoad.errors.push("onSelectFile: " + e.description); }
+}
+function onMsgBoxLoadMcp(mb) {
+    try {
+        if (!pendingLoad) return;
+        var ev = { caption: safeStr(mb.caption), text: safeStr(mb.text), type: mb.type };
+        pendingLoad.msgBoxes.push(ev);
+        mb.cancel = true;
+        var t = String(mb.text), k = mb.type & 0x0F;
+        if ((k == 3 || k == 4) && /загруз|потер/i.test(t)) { mb.result = 6; ev.action = "Да"; }
+        else if (k == 0) { mb.result = 1; ev.action = "ОК"; }
+        else { mb.result = 2; ev.action = "Отмена (незнакомый)"; pendingLoad.stranger = ev; }
+    } catch (e) { if (pendingLoad) pendingLoad.errors.push("onMessageBox: " + e.description); }
+}
+OPS.cfg_load_cf = function (a) {
+    var path = String(a.cf || "");
+    if (!/^Y:\\Snegopat-mcp\\(backups|verify)\\[A-Za-z0-9_.\-\\]+\.cf$/.test(path) || !fso.FileExists(path))
+        throw new Error("недопустимый или отсутствующий cf: " + path);
+    var c = container(a.container);
+    if (c.isModified) throw new Error("контейнер изменён (isModified=true) — загрузка отклонена (потеря правок)");
+    var st = cmdState(6);
+    if (!st || !st.enabled) throw new Error("команда «Загрузить конфигурацию из файла» недоступна");
+    pendingLoad = { path: path, used: false, selectEvents: [], msgBoxes: [], errors: [], stranger: null };
+    var sent = false, t0 = new Date().getTime();
+    try {
+        events.connect(Designer, "onSelectFile", SelfScript.self, "onSelectFileLoadMcp");
+        events.connect(windows, "onMessageBox", SelfScript.self, "onMsgBoxLoadMcp");
+        sent = sendCommand(CFG_GROUP, 6);
+    } finally {
+        try { events.disconnect(Designer, "onSelectFile", SelfScript.self, "onSelectFileLoadMcp"); } catch (e) {}
+        try { events.disconnect(windows, "onMessageBox", SelfScript.self, "onMsgBoxLoadMcp"); } catch (e) {}
+    }
+    var pl = pendingLoad; pendingLoad = null;
+    var res = { cf: path, sent: sent, ms: new Date().getTime() - t0, pathUsed: pl.used,
+        selectEvents: pl.selectEvents, msgBoxes: pl.msgBoxes, errors: pl.errors,
+        stranger: pl.stranger, isModified: container(a.container).isModified };
+    if (pl.stranger) throw new Error("незнакомый диалог при загрузке: " +
+        safeStr(pl.stranger.caption) + " / " + safeStr(pl.stranger.text) + " — проверьте модальный дампер");
+    if (!pl.used) throw new Error("диалог выбора файла не отработал (pathUsed=false)");
+    return res;
+};
+
 // Сохранение конфигурации (Config, 3). Только при архиве cf, снятом в этой сессии (инвариант 5).
-OPS.config_save = function (a) {
-    var arch = String(a.archive || "");
+OPS.config_save = function (a) {    var arch = String(a.archive || "");
     if (!/^Y:\\Snegopat-mcp\\backups\\[A-Za-z0-9_.\-]+\.cf$/.test(arch) || !fso.FileExists(arch) || fso.GetFile(arch).Size == 0)
         throw new Error("нет архива cf перед сохранением: " + arch);
     var c = container(a.container);

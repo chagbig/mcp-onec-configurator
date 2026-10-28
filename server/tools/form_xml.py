@@ -48,6 +48,90 @@ class FormXmlError(Exception):
     pass
 
 
+BACKUPS = Path(r"Y:\Snegopat-mcp\backups")
+WORK_GC_KEEP = 2            # сколько старых work-каталогов переживают уборку
+WORK_GC_MIN_AGE_S = 3600.0  # каталоги моложе часа уборка не трогает (чужие прогоны)
+
+
+def _validate_form_xml(xml_text: str) -> None:
+    """Лёгкая валидация ДО тяжёлой цепочки: well-formed + корневой элемент Form
+    (ns logform). Битый XML иначе обнаружился бы только в постусловии М5 —
+    после минут пересборки temp_write."""
+    from lxml import etree
+    try:
+        root = etree.fromstring(xml_text.encode("utf-8"))
+    except etree.XMLSyntaxError as e:
+        raise FormXmlError(f"XML не разбирается (правка отклонена до цепочки): {e}")
+    want = "{http://v8.1c.ru/8.3/xcf/logform}Form"
+    if root.tag != want:
+        raise FormXmlError(
+            f"корневой элемент {root.tag}, ожидается {want} — правка отклонена до цепочки")
+
+
+def _gc_work(root: Path, keep: int = WORK_GC_KEEP,
+             min_age_s: float = WORK_GC_MIN_AGE_S,
+             exclude: Path | None = None) -> list[str]:
+    """Retention тяжёлых work-каталогов (temp-базы по 0,004–6 ГБ): удаляются
+    каталоги старше min_age_s, кроме keep свежайших; exclude (текущий прогон)
+    не трогается. Ошибки (антивирусные блокировки) молча пропускаются."""
+    if not root.is_dir():
+        return []
+    now = time.time()
+
+    def age(p: Path) -> float:
+        try:
+            return now - p.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    dirs = [d for d in root.iterdir() if d.is_dir() and d != exclude]
+    cands = sorted((d for d in dirs if age(d) > min_age_s), key=age)
+    doomed = cands[:len(cands) - keep] if keep else list(cands)
+    removed = []
+    for d in doomed:
+        shutil.rmtree(d, ignore_errors=True)
+        if not d.exists():
+            removed.append(d.name)
+    return removed
+
+
+def _gc_arch_cfs(backups: Path, min_age_s: float = WORK_GC_MIN_AGE_S,
+                 extra_keep: Path | None = None) -> list[str]:
+    """Архивы mcp-formxml-*.cf копятся в backups по 2 ГБ за каждое чтение без
+    cf_path: удаляются файлы старше min_age_s, кроме упомянутых в реестре cf и
+    extra_keep (cf текущего прогона)."""
+    refs = set()
+    try:
+        reg = json.loads(_cf_registry_path().read_text(encoding="utf-8"))
+        refs = {Path(v["cf"]).resolve() for v in reg.values()}
+    except Exception:
+        pass
+    if extra_keep is not None:
+        refs.add(extra_keep.resolve())
+    now = time.time()
+    removed = []
+    if not backups.is_dir():
+        return removed
+    for f in backups.glob("mcp-formxml-*.cf"):
+        try:
+            if f.resolve() in refs or now - f.stat().st_mtime <= min_age_s:
+                continue
+            f.unlink()
+            removed.append(f.name)
+        except OSError:
+            continue
+    return removed
+
+
+def _gc_housekeeping(current_work: Path, current_cf: Path | None) -> dict:
+    """Уборка после операции; никогда не роняет её."""
+    try:
+        return {"work_dirs": _gc_work(WORK, exclude=current_work),
+                "arch_cfs": _gc_arch_cfs(BACKUPS, extra_keep=current_cf)}
+    except Exception as e:
+        return {"error": str(e)[:120]}
+
+
 def _designer(args, log, res, timeout=1800):
     ok, info = mtl.run_designer(args, log, res, timeout)
     if not ok:
@@ -195,7 +279,7 @@ def _get_cf(bridge: Bridge, pid: int, base: Path, cf_path: str | None,
                 age = time.time() - float(ent["ts"])
                 if age <= cf_max_age_s:
                     return p, "cf-cache (%.0f с)" % age
-    cf = _arch_cf(bridge, pid, "mcp-formxml-" + _stamp() + ".cf")
+    cf = _arch_cf(bridge, pid, "mcp-formxml-%d-%s.cf" % (os.getpid(), _stamp()))
     _cf_registry_put(base, cf)
     return cf, "fresh"
 
@@ -239,11 +323,13 @@ def form_get_xml(session: int, obj_path: str, form_name: str, owner_path: str,
     record_hash = _form_record_sha1(cf, form_uuid)
     xml_cache = CACHE / "xml" / (record_hash + ".xml")
     if xml_cache.is_file():
-        return {"xml": xml_cache.read_text(encoding="utf-8-sig"),
-                "xml_path": str(xml_cache), "cf": str(cf), "cf_source": cf_src,
-                "snapshot": snap, "full_name": obj_path if not form_name else f"{obj_path}.Форма.{form_name}",
-                "form_uuid": form_uuid, "record_sha1": record_hash,
-                "cache": "xml-hit", "ms": round((time.time() - t0) * 1000)}
+        result = {"xml": xml_cache.read_text(encoding="utf-8-sig"),
+                  "xml_path": str(xml_cache), "cf": str(cf), "cf_source": cf_src,
+                  "snapshot": snap, "full_name": obj_path if not form_name else f"{obj_path}.Форма.{form_name}",
+                  "form_uuid": form_uuid, "record_sha1": record_hash,
+                  "cache": "xml-hit", "ms": round((time.time() - t0) * 1000)}
+        result["gc"] = _gc_housekeeping(None, cf)
+        return result
     work = (base_dir or WORK) / _cf_key(cf)
     work.mkdir(parents=True, exist_ok=True)
     tread = temp_base if temp_base is not None else work / "tread"
@@ -268,6 +354,7 @@ def form_get_xml(session: int, obj_path: str, form_name: str, owner_path: str,
     return {"xml": xml, "xml_path": str(xmls[0]), "cf": str(cf), "cf_source": cf_src,
             "snapshot": snap, "full_name": full_name, "form_uuid": form_uuid,
             "record_sha1": record_hash, "cache": "temp-reuse" if reusable else "miss",
+            "gc": _gc_housekeeping(work, cf),
             "ms": round((time.time() - t0) * 1000)}
 
 
@@ -279,14 +366,14 @@ def form_set_xml(session: int, obj_path: str, form_name: str, owner_path: str,
 
     edit — callable(xml_text) -> новый xml_text (правка вызывающим; валидация —
     скиллом form-validate до вызова); edit_marker — подстрока-признак правки для
-    постусловия М5 (имя добавленного элемента и т.п.). Конфигуратор живой базы
-    будет закрыт и переоткрыт (запись через редактор не работает, П3 §4.3).
+    постусловия М5 (имя добавленного элемента и т.п.). Запись в живую базу —
+    штатной командой «Загрузить конфигурацию из файла» через мост: конфигуратор
+    остаётся открытым, сессия не меняется (new_session = session).
     """
     t0 = time.time()
     cfg = load_config()
     bridge = Bridge(cfg)
-    base = _session_base(bridge, session)
-    pid = session_for_base(bridge, base)
+    pid = session_for_base(bridge, _session_base(bridge, session))
     if _modified(bridge, pid):
         raise FormXmlError("контейнер изменён — сначала сохраните или отклоните правки")
     snap = snapshot_owner(bridge, pid, owner_path)
@@ -295,7 +382,7 @@ def form_set_xml(session: int, obj_path: str, form_name: str, owner_path: str,
             "состав владельца изменился с момента чтения XML (К2): "
             f"было {expected_snapshot}, стало {snap} — отказ до записи")
     form_uuid = _form_uuid(bridge, pid, obj_path, form_name)
-    cf = _arch_cf(bridge, pid, "mcp-formxml-" + _stamp() + ".cf")
+    cf = _arch_cf(bridge, pid, "mcp-formxml-%d-%s.cf" % (os.getpid(), _stamp()))
     work = (base_dir or WORK) / cf.stem
     work.mkdir(parents=True, exist_ok=True)
     twrite = work / "twrite"
@@ -307,7 +394,11 @@ def form_set_xml(session: int, obj_path: str, form_name: str, owner_path: str,
     _designer(["/F", str(twrite), "/DumpConfigToFiles", str(dump_dir),
                "-listFile", str(lf)], work / "dump0.log", work / "dump0.res")
     form_xml = next(dump_dir.rglob("Form.xml"))
-    edited = edit(form_xml.read_text(encoding="utf-8-sig"))
+    src_text = form_xml.read_text(encoding="utf-8-sig")
+    edited = edit(src_text)
+    if edited == src_text:
+        raise FormXmlError("правка не изменила XML — отказ до цепочки (иначе минуты впустую)")
+    _validate_form_xml(edited)
     load_dir = work / "load"
     if load_dir.exists():
         shutil.rmtree(load_dir)
@@ -338,27 +429,26 @@ def form_set_xml(session: int, obj_path: str, form_name: str, owner_path: str,
     cf2 = work / "cf2.cf"
     _designer(["/F", str(twrite), "/DumpCfg", str(cf2)],
               work / "dumpcf.log", work / "dumpcf.res")
-    # запись в живую базу: конфигуратор(ы) закрываются (isModified=false выше).
-    # Если пакетный шаг упал — восстанавливаем сессию: без неё пользователь без
-    # конфигуратора, а база при отказе /LoadCfg не тронута (загрузка атомарна).
+    # запись в живую базу — штатной командой «Загрузить конфигурацию из файла»
+    # (Config, 6) через мост: конфигуратор ОСТАЁТСЯ ОТКРЫТЫМ. Пакетный путь
+    # (kill + /LoadCfg) упирался в «1Cv8.cdn. Схема не зарегистрирована» — окно
+    # недоступности базы после закрытия + зомби-конфигураторы (e2e 28.10.2026);
+    # мостовая загрузка снимает весь класс проблем, сессия не меняется.
+    bridge.call(pid, "cfg_load_cf", {"cf": str(cf2)}, timeout=600)
     try:
-        _kill_session(bridge, pid, base)
-        _designer_retry(["/F", str(base), "/LoadCfg", str(cf2)],
-                        work / "loadlive.log", work / "loadlive.res")
-        _designer_retry(["/F", str(base), "/UpdateDBCfg"],
-                        work / "updlive.log", work / "updlive.res")
-    except FormXmlError:
-        try:
-            _relaunch(base)
-        except FormXmlError:
-            pass  # исходная ошибка важнее
-        raise
-    new_pid = _relaunch(base)
+        bridge.call(pid, "update_db_cfg",
+                    {"own_bases": cfg.own_bases,
+                     "allowedDialogs": cfg.update_db_allowed_dialogs}, timeout=600)
+    except BridgeError as e:
+        # «недоступна» = конфигурация БД уже соответствует cf2 (структура та же)
+        if "недоступна" not in str(e):
+            raise
+    new_pid = pid
     # верификация: свежий cf живой базы, текст формы == cf2 (нормализованные)
     from cf_inspect import CfFile
     from form_text import texts_equal, load_form_text
     key = form_uuid.strip("{}").lower() + ".0"
-    cfv = _arch_cf(bridge, new_pid, "mcp-formxml-" + _stamp() + "-v.cf")
+    cfv = _arch_cf(bridge, new_pid, "mcp-formxml-%d-%s-v.cf" % (os.getpid(), _stamp()))
     with CfFile(str(cfv)) as c:
         cfv_text = c.read({r["name"]: r for r in c.records()}[key]).decode("utf-8-sig")
     with CfFile(str(cf2)) as c:
@@ -374,7 +464,8 @@ def form_set_xml(session: int, obj_path: str, form_name: str, owner_path: str,
         if edit_marker not in live_text:
             raise FormXmlError("верификация (б): правки нет в живом form_save")
     return {"cf2": str(cf2), "verify_cf": str(cfv), "new_session": new_pid,
-            "form_uuid": form_uuid, "ms": round((time.time() - t0) * 1000)}
+            "form_uuid": form_uuid, "gc": _gc_housekeeping(work, cfv),
+            "ms": round((time.time() - t0) * 1000)}
 
 
 def _stamp() -> str:
@@ -388,67 +479,3 @@ def _session_base(bridge: Bridge, session: int) -> Path:
             value = conn.split("=", 1)[1].rstrip(";\" ")
             return Path(value)
     raise FormXmlError(f"сессия {session} не найдена")
-
-
-def _kill_session(bridge: Bridge, pid: int, base: Path | None = None) -> None:
-    """Закрыть конфигуратор живой базы: сначала мягко (WM_CLOSE, локи снимаются
-    самим процессом — жёсткий kill оставляет .cfl и роняет следующий пакетный
-    вызов «1Cv8.cdn. Схема не зарегистрирована»), затем форс. Если задан base —
-    гасятся ВСЕ конфигураторы этой базы: зомби-сессия от прошлого прогона держит
-    1CD и ретраями не лечится (П4 28.10.2026)."""
-    targets = {pid}
-    if base is not None:
-        want = mtl.norm_file_key(base)
-        for s in bridge.sessions():
-            if not s.alive:
-                continue
-            conn = str(s.data.get("conn") or "")
-            if "=" in conn and mtl.norm_file_key(
-                    Path(conn.split("=", 1)[1].rstrip(";\" "))) == want:
-                targets.add(s.pid)
-    for t in sorted(targets):
-        subprocess.run(["taskkill", "/PID", str(t)], capture_output=True)
-    for _ in range(25):
-        if not any(s.pid in targets and s.alive for s in bridge.sessions()):
-            break
-        time.sleep(1)
-    else:
-        for t in sorted(targets):
-            subprocess.run(["taskkill", "/PID", str(t), "/F"], capture_output=True)
-    for _ in range(30):
-        if not any(s.pid in targets and s.alive for s in bridge.sessions()):
-            time.sleep(5)  # отпустить файлы базы
-            return
-        time.sleep(1)
-    raise FormXmlError("конфигуратор живой базы не завершился")
-
-
-def _designer_retry(args, log, res, timeout=1800, attempts=3):
-    last = None
-    for i in range(attempts):
-        try:
-            return _designer(args, log, res, timeout)
-        except FormXmlError as e:
-            last = e
-            if "Схема не зарегистрирована" not in str(e) and "1Cv8.cdn" not in str(e):
-                raise
-            time.sleep(20)  # файлы базы ещё отпускаются после kill
-    raise last
-
-
-def _relaunch(base: Path, timeout=180) -> int:
-    """Поднять конфигуратор обратно (без /DisableStartupDialogs — движок Снегопата
-    с ним не инициализируется), дождаться моста и открыть конфигурацию."""
-    subprocess.Popen([str(PLATFORM), "DESIGNER", "/F", str(base)])
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        time.sleep(3)
-        cfg = load_config()
-        bridge = Bridge(cfg)
-        try:
-            pid = session_for_base(bridge, base)
-        except FormXmlError:
-            continue
-        bridge.call(pid, "config_open", {}, timeout=300)
-        return pid
-    raise FormXmlError(f"конфигуратор на {base} не поднялся за {timeout} с")

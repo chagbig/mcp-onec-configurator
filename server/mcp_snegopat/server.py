@@ -562,14 +562,17 @@ class Toolkit:
     def form_set_xml(self, session: int, obj_path: str, xml: str, edit_marker: str = "",
                      owner_path: str = "",
                      expected_snapshot: dict | None = None) -> dict:
-        """Записать правку XML формы в живую базу (этап 8 §3.2 ред. 3). ТЯЖЁЛОЕ (8–12 мин
-        на конфигурации 2 ГБ) и ПОБОЧНОЕ: конфигуратор живой базы ЗАКРЫВАЕТСЯ и
-        переоткрывается (ответ несёт new_session). Цепочка: cf → temp_write → правка →
-        постусловия → cf2 → /LoadCfg → /UpdateDBCfg → верификация. xml — ПОЛНЫЙ текст
-        Form.xml (правьте XML из form_get_xml); edit_marker — подстрока-признак правки
-        (проверяется в выгрузке temp_write и живой форме); expected_snapshot — снимок из
-        form_get_xml (расхождение состава владельца = отказ, К2). Валидация XML — на вас
-        (скил form-validate) ДО вызова; запись при isModified=true отказана."""
+        """Записать правку XML формы в живую базу (этап 8 §3.2 ред. 4). ТЯЖЁЛОЕ (8–12 мин
+        на конфигурации 2 ГБ); конфигуратор ОСТАЁТСЯ ОТКРЫТЫМ (загрузка cf2 — штатной
+        командой «Загрузить конфигурацию из файла» через мост; пакетный /LoadCfg после
+        kill упирался в «1Cv8.cdn. Схема не зарегистрирована» и удалён). Цепочка:
+        cf → temp_write → правка → постусловия → cf2 → cfg_load_cf → update_db_cfg →
+        верификация (cf живой == cf2 по тексту; edit_marker в живом form_save).
+        xml — ПОЛНЫЙ текст Form.xml (правьте XML из form_get_xml); edit_marker —
+        подстрока-признак правки (проверяется в выгрузке temp_write и живой форме);
+        expected_snapshot — снимок из form_get_xml (расхождение состава владельца =
+        отказ, К2). Валидация XML — на вас (скил form-validate) ДО вызова; запись при
+        isModified=true отказана. update_db_cfg требует базу в own_bases конфига."""
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
         from form_xml import form_set_xml as _impl, FormXmlError
 
