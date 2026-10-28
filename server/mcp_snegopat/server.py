@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import os
 import threading
 import time
@@ -534,6 +535,54 @@ class Toolkit:
             raise BridgeError("bad_args", "file обязателен")
         return self._call(session, "form_load", self._a(container, path=path, prop=prop, file=file))
 
+    def form_get_xml(self, session: int, obj_path: str, form_name: str = "",
+                     owner_path: str = "", cf_path: str = "",
+                     temp_base: str = "") -> dict:
+        """XML формы из cf последнего сохранённого состояния (этап 8 §3.1). ТЯЖЁЛОЕ:
+        минуты (cf конфигурации + temp-база). obj_path — владелец («Справочник.X» /
+        «ОбщаяФорма.X»); form_name — имя формы («ФормаЭлемента», пусто для общей);
+        owner_path — для снимка состава К2 (по умолчанию obj_path); cf_path — готовый
+        cf (иначе снимается свежий); temp_base — готовая temp-база из этого cf (иначе
+        строится). При isModified=true — ОТКАЗ (несохранённые правки, К1).
+        Ответ: xml, snapshot (передайте в form_set_xml), form_uuid, cf, ms."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        from form_xml import form_get_xml as _impl, FormXmlError
+        try:
+            return _impl(session, obj_path, form_name,
+                         owner_path or obj_path,
+                         cf_path or None,
+                         temp_base=Path(temp_base) if temp_base else None)
+        except FormXmlError as e:
+            raise BridgeError("form_xml", str(e))
+
+    def form_set_xml(self, session: int, obj_path: str, xml: str, edit_marker: str = "",
+                     owner_path: str = "",
+                     expected_snapshot: dict | None = None) -> dict:
+        """Записать правку XML формы в живую базу (этап 8 §3.2 ред. 3). ТЯЖЁЛОЕ (8–12 мин
+        на конфигурации 2 ГБ) и ПОБОЧНОЕ: конфигуратор живой базы ЗАКРЫВАЕТСЯ и
+        переоткрывается (ответ несёт new_session). Цепочка: cf → temp_write → правка →
+        постусловия → cf2 → /LoadCfg → /UpdateDBCfg → верификация. xml — ПОЛНЫЙ текст
+        Form.xml (правьте XML из form_get_xml); edit_marker — подстрока-признак правки
+        (проверяется в выгрузке temp_write и живой форме); expected_snapshot — снимок из
+        form_get_xml (расхождение состава владельца = отказ, К2). Валидация XML — на вас
+        (скил form-validate) ДО вызова; запись при isModified=true отказана."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        from form_xml import form_set_xml as _impl, FormXmlError
+
+        def _edit(old_xml: str) -> str:
+            if not xml.strip():
+                raise FormXmlError("xml пуст — правка отказана")
+            if old_xml == xml:
+                raise FormXmlError("xml не отличается от текущего — правка отказана")
+            return xml
+
+        try:
+            return _impl(session, obj_path, "", owner_path or obj_path, _edit,
+                         edit_marker=edit_marker or None,
+                         expected_snapshot=expected_snapshot)
+        except FormXmlError as e:
+            raise BridgeError("form_xml", str(e))
+
     # ---------- служебное ----------
 
     def tree_activate(self, session: int | None = None, container: int | None = None,
@@ -700,7 +749,7 @@ _TOOLS = [
     "md_add_child", "md_delete",
     "config_open", "cfg_archive_cf", "config_save", "syntax_check", "update_db_cfg",
     "cfgstore_capture", "cfgstore_commit",
-    "form_export", "form_import",
+    "form_export", "form_import", "form_get_xml", "form_set_xml",
     "tree_activate", "tree_activate_group", "dialog_probe",
     "bridge_wait", "bridge_stats", "focus_probe",
 ]
