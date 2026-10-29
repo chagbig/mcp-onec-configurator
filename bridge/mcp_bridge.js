@@ -623,6 +623,11 @@ OPS.editor_commit = function (a) {
     var t = av ? safeStr(av.title) : null;
     if (!t || String(t).indexOf(String(a.title)) < 0)
         throw new Error("активация не удалась: активно «" + t + "»");
+    // FileSave/FileClose на дереве ОСНОВНОЙ конфигурации = сохранение МИНУС гейт
+    // config_save (архив cf-отката) — запрет (ревью v1.0.0 H)
+    if (String(t).indexOf("Конфигурация") === 0)
+        throw new Error("editor_commit запрещён на дереве основной конфигурации — "
+            + "используйте config_save (инвариант архивной точки отката)");
     var st = null;
     try { st = getCmdState(FRAME_GROUP, num); } catch (eS) { st = "?" + eS.description; }
     var sent = sendCommand(FRAME_GROUP, num);
@@ -1807,7 +1812,7 @@ function onWizardModal(d) {
         // висел; caption всё равно проверяется ниже, чужие диалоги не трогаем
         var leaveYield = addCapture && addCapture.modalPolicy == "leave";
         if (!leaveYield && (stgCapture || updCapture || addCapture || delCapture ||
-            pendingArchive || probeCapture || synCapture)) return;
+            pendingArchive || probeCapture || synCapture || pendingLoad)) return;
         // флаг перечитывается на каждом диалоге: правки флаг-файла действуют
         // и в уже запущенном конфигураторе
         wizardJob = loadWizardJob();

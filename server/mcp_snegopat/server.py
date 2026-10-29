@@ -106,7 +106,7 @@ def _ext_exists_packed(base, name: str) -> bool:
     import os as _os
     import shutil as _sh
     base = str(base)
-    work = "Y:/Snegopat-mcp/temp/extcheck-base"
+    work = "Y:/Snegopat-mcp/temp/extcheck-%s" % _uuid.uuid4().hex[:8]
     _sh.rmtree(work, ignore_errors=True)
     _os.makedirs(work, exist_ok=True)
     for _f in _os.listdir(base):
@@ -660,7 +660,8 @@ class Toolkit:
             raise BridgeError("bad_args", "file: [A-Za-z0-9_.-].cfe")
         open_status = "not-open"
         exts = self.ext_list(session=session).get("extensions", [])
-        mine = [e for e in exts if name in (e.get("root") or "") or name in (e.get("identifier") or "")]
+        mine = [e for e in exts if name == (e.get("root") or "")
+                or name in (e.get("identifier") or "").replace("Расширение конфигурации ", "").strip('"')]
         if not mine:
             base0 = base_path or str(_session_base_path(self.bridge, session))
             if not _ext_exists_packed(base0, name):
@@ -678,7 +679,10 @@ class Toolkit:
         # «1Cv8.cdn. Схема не зарегистрирована» (28.10.2026) — работаем по КОПИИ базы
         # (1Cv8.1CD + служебные; занятые 1Cv8.cgr/1Cv8Log и .cfl пропускаются)
         import shutil as _sh
-        work_base = r"Y:\Snegopat-mcp\temp\extdump-base"
+        import uuid as _uu
+        # уникальный каталог: параллельные вызовы используют один и тот же
+        # фиксированный каталог → взаимный rmtree чужой копии (ревью v1.0.0 H)
+        work_base = "Y:/Snegopat-mcp/temp/extdump-%s" % _uu.uuid4().hex[:8]
         _sh.rmtree(work_base, ignore_errors=True)
         _os.makedirs(work_base, exist_ok=True)
         copied = []
@@ -713,7 +717,8 @@ class Toolkit:
         правки попадают в cfe. Дерево расширения должно быть открыто (ext_list);
         перед сохранением правки агента — снимите cfe-точку отката (ext_dump_cfe)."""
         exts = self.ext_list(session=session).get("extensions", [])
-        mine = [e for e in exts if name in (e.get("root") or "") or name in (e.get("identifier") or "")]
+        mine = [e for e in exts if name == (e.get("root") or "")
+                or name in (e.get("identifier") or "").replace("Расширение конфигурации ", "").strip('"')]
         if not mine:
             raise BridgeError("bad_args", f"расширение «{name}» не найдено среди открытых (ext_list)")
         title = mine[0]["identifier"].replace("Расширение конфигурации ", "").strip('"')
@@ -735,50 +740,42 @@ class Toolkit:
         пакетная проверка по КОПИИ базы (/DumpCfg -Extension; факт П1: созданное и
         не открытое расширение в openedCount НЕ появляется). ПОВТОРНЫЙ Ins при
         существующем имени даёт неуправляемую модалку «не уникально» (М-5) —
-        существование проверяется ДО отправки Ins."""
-        import json as _json
+        существование проверяется ДО отправки Ins.
+        (ред. ревью v1.0.0: флаг через _wizard_lock — не затирает чужие диалоги;
+        дедлайн адаптивный — копия базы 2 ГБ занимает минуты.)"""
         import subprocess as _sp
         import os as _os
         import time as _t
         base = str(_session_base_path(self.bridge, session))
-        # 1. негатив: расширение уже есть? (пакетная проверка по копии)
         if _ext_exists_packed(base, name):
             raise BridgeError("bad_args", f"расширение «{name}» уже есть в базе")
-        # 2. флаг мастер-раннера на диалог «Новое расширение конфигурации»
-        flag = r"Y:\Snegopat-mcp\mcp\mcp_stg_wizard.json"
-        job = {"dialogs": [{"caption": "Новое расширение конфигурации", "steps": [
+        self._set_wizard_dialog("Новое расширение конфигурации", [
             {"set": {"EditName": name, "EditPrefix": prefix, "EditSynonym": synonym,
                      "EditUsePurpose": purpose},
              "report": ["EditName", "EditPrefix", "EditSynonym", "EditUsePurpose"]},
-            {"click": "OkButton"}]}]}
-        tmp = flag + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(_json.dumps(job, ensure_ascii=False, indent=1))
-        _os.replace(tmp, flag)
+            {"click": "OkButton"}])
         try:
             self._call(session, "view_activate", {"title": "Расширения конфигурации"})
-            self._call(session, "activate_self", {})  # фокус ввода в конфигуратор
+            self._call(session, "activate_self", {})
             self._call(session, "key_send", {"key": 0x09})  # Tab — фокус в грид
             self._call(session, "key_send", {"key": 0x2D})  # Ins — открывает диалог
-            # 3. постусловие: пакетная проверка по копии (диалог закрыт раннером)
-            deadline = _t.time() + 30
+            # дедлайн адаптивный: копия базы в _ext_exists_packed на 2 ГБ — минуты
+            size = _os.path.getsize(_os.path.join(base, "1Cv8.1CD"))                 if _os.path.isfile(_os.path.join(base, "1Cv8.1CD")) else 0
+            deadline = _t.time() + 60 + (size // (100 * 1024 * 1024)) * 60
             ok = False
             while _t.time() < deadline and not ok:
-                _t.sleep(3)
+                _t.sleep(5)
                 try:
                     ok = _ext_exists_packed(base, name)
                 except Exception:
                     ok = False
             if not ok:
                 raise BridgeError("ext_create_failed",
-                                  "расширение не создано за 30 с — проверьте wizard.log/модалки "
+                                  "расширение не создано — проверьте wizard.log/модалки "
                                   "(повторный Ins при существующем имени даёт зомби-модалку)")
             return {"created": name, "verified": "packed-check"}
         finally:
-            _os.replace(flag + ".clean", flag) if _os.path.isfile(flag + ".clean") else None
-            with open(flag, "w", encoding="utf-8") as f:
-                f.write(_json.dumps({"dialogs": []}))
-            _os.remove(tmp) if _os.path.isfile(tmp) else None
+            self._clear_wizard_dialog("Новое расширение конфигурации")
 
     def ext_open(self, session: int, name: str) -> dict:
         """Открыть дерево расширения (контейнер появится в session_info): менеджер →
@@ -935,7 +932,7 @@ class Toolkit:
         # дерево расширения имеет заголовок = отображаемое имя расширения: для
         # неосновного контейнера принимаем ЛЮБОЙ заголовок, кроме дерева основной
         # конфигурации (этап 13, М-6 — уход клавиш в основное дерево = порча)
-        ext_mode = container is not None and container > 0
+        ext_mode = container is not None
         title = None
         for _ in range(3):
             self.bridge.call(pid, "tree_activate", self._a(container, path=path))

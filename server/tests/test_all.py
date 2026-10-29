@@ -475,6 +475,76 @@ class TestFormXmlValidateAndGc(unittest.TestCase):
             self.assertTrue(f2.is_file() and other.is_file())
 
 
+
+class TestFillShellAdopted(unittest.TestCase):
+    """C1 ревью v1.0.0: Adopted-ветвь fill_shell (реквизиты ТЧ cf2 → расширение)."""
+
+    HDR = ('<?xml version="1.0" encoding="UTF-8"?>'
+           '<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" '
+           'xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" '
+           'xmlns:v8="http://v8.1c.ru/8.1/data/core" '
+           'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">')
+
+    def _doc(self, ts_uuid, attr_uuid=None):
+        attr = ""
+        if attr_uuid:
+            attr = ('<Attribute uuid="%s"><Properties><Name>Реквизит1</Name>'
+                    '<Type><v8:Type>xs:string</v8:Type></Type></Properties></Attribute>'
+                    % attr_uuid)
+        return (self.HDR + '<Document uuid="11111111-1111-1111-1111-111111111111">'
+                '<Properties><Name>Док</Name></Properties>'
+                '<ChildObjects><TabularSection uuid="%s">'
+                '<Properties><Name>Т</Name></Properties>'
+                '<ChildObjects>%s</ChildObjects></TabularSection>'
+                '</ChildObjects></Document></MetaDataObject>' % (ts_uuid, attr))
+
+    def test_adopted_tch_with_new_attr(self) -> None:
+        import tempfile
+        from pathlib import Path as _P
+        from build_ext import fill_shell
+        with tempfile.TemporaryDirectory() as d:
+            shell = _P(d) / "shell.xml"
+            shell.write_text(self.HDR + '<Document uuid="aaaaaaaa-1111-1111-1111-111111111111">'
+                             '<Properties><ObjectBelonging>Adopted</ObjectBelonging>'
+                             '<Name>Док</Name><ExtendedConfigurationObject>'
+                             '11111111-1111-1111-1111-111111111111</ExtendedConfigurationObject>'
+                             '</Properties><ChildObjects/></Document></MetaDataObject>',
+                             encoding="utf-8-sig")
+            f1 = _P(d) / "c1.xml"
+            f1.write_text(self._doc("22222222-2222-2222-2222-222222222222"),
+                          encoding="utf-8-sig")
+            f2 = _P(d) / "c2.xml"
+            f2.write_text(self._doc("22222222-2222-2222-2222-222222222222",
+                                    "33333333-3333-3333-3333-333333333333"),
+                          encoding="utf-8-sig")
+            r = fill_shell(shell, f1, f2, "Мср14_")
+            self.assertEqual(r["added_tch"], 1)  # C1: ветвь жива
+            self.assertEqual(r["added_attr"], 1)
+            out = shell.read_text(encoding="utf-8-sig")
+            self.assertIn("<ObjectBelonging>Adopted</ObjectBelonging>", out)
+            self.assertIn("ExtendedConfigurationObject>22222222-2222-2222-2222-222222222222<", out)
+            self.assertIn("Мср14_Реквизит1", out)
+
+    def test_adopted_tch_without_new_attrs_skipped(self) -> None:
+        import tempfile
+        from pathlib import Path as _P
+        from build_ext import fill_shell
+        with tempfile.TemporaryDirectory() as d:
+            shell = _P(d) / "shell.xml"
+            shell.write_text(self.HDR + '<Document uuid="aaaaaaaa-1111-1111-1111-111111111111">'
+                             '<Properties><ObjectBelonging>Adopted</ObjectBelonging>'
+                             '<Name>Док</Name></Properties><ChildObjects/></Document>'
+                             '</MetaDataObject>', encoding="utf-8-sig")
+            f1 = _P(d) / "c1.xml"
+            f1.write_text(self._doc("22222222-2222-2222-2222-222222222222"),
+                          encoding="utf-8-sig")
+            f2 = _P(d) / "c2.xml"
+            f2.write_text(self._doc("22222222-2222-2222-2222-222222222222"),
+                          encoding="utf-8-sig")
+            r = fill_shell(shell, f1, f2, "Мср14_")
+            self.assertEqual((r["added_tch"], r["added_attr"], r["inserted"]), (0, 0, 0))
+
+
 class TestServerBuild(unittest.TestCase):
     def test_all_tools_registered(self) -> None:
         import asyncio

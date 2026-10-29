@@ -434,14 +434,38 @@ def form_set_xml(session: int, obj_path: str, form_name: str, owner_path: str,
     # (kill + /LoadCfg) упирался в «1Cv8.cdn. Схема не зарегистрирована» — окно
     # недоступности базы после закрытия + зомби-конфигураторы (e2e 28.10.2026);
     # мостовая загрузка снимает весь класс проблем, сессия не меняется.
+    # TOCTOU-страж (ревью v1.0.0 H): cfg_load_cf заменяет ВСЮ основную конфигурацию
+    # — между снятием cf для temp_write и этим моментом человек мог СОХРАНИТЬ свою
+    # правку (isModified=false, снимок владельца не видит чужие объекты). Свежий cf
+    # живой базы обязан совпасть с cf, из которого строился temp_write.
+    cf_now = _arch_cf(bridge, pid, "mcp-formxml-%d-%s-now.cf" % (os.getpid(), _stamp()))
+    from cf_inspect import CfFile as _CF
+    import hashlib as _hl
+    def _rec_hashes(path):
+        with _CF(path) as c:
+            return {r["name"]: _hl.sha1(c.read(r)).hexdigest()
+                    for r in c.records()
+                    if not re.match(r"^(configinfo|version|versions|deleted|root)$", r["name"])}
+    if _rec_hashes(cf_now) != _rec_hashes(cf):
+        raise FormXmlError(
+            "конфигурация живой базы изменилась с момента чтения XML "
+            "(чужие сохранённые правки) — cfg_load_cf затёр бы их; отказ, перечитайте")
     bridge.call(pid, "cfg_load_cf", {"cf": str(cf2)}, timeout=600)
     try:
         bridge.call(pid, "update_db_cfg",
                     {"own_bases": cfg.own_bases,
                      "allowedDialogs": cfg.update_db_allowed_dialogs}, timeout=600)
     except BridgeError as e:
-        # «недоступна» = конфигурация БД уже соответствует cf2 (структура та же)
-        if "недоступна" not in str(e):
+        msg = str(e)
+        # «недоступна» = конфигурация БД уже соответствует cf2 (структура та же) — не ошибка
+        if "недоступна" in msg:
+            pass
+        elif "forbidden" in msg or "own_bases" in msg:
+            raise FormXmlError(
+                "конфигурация загружена в живую базу (cfg_load_cf), но update_db_cfg "
+                "запрещён конфигурацией сервера (" + msg[:120] + ") — БД НЕ обновлена; "
+                "добавьте базу в own_bases или обновите БД вручную")
+        else:
             raise
     new_pid = pid
     # верификация: свежий cf живой базы, текст формы == cf2 (нормализованные)

@@ -88,7 +88,13 @@ def compare_dumps(dir1: Path, dir2: Path) -> dict:
         if _xml_sha(f1[k]) != _xml_sha(f2[k]):
             entry = {"path": k, "classes": {}}
             stem = k.split("/")[-1].replace(".xml", "").replace(".bsl", "")
-            entry["uuid"] = m1.get(stem) or m2.get(stem)
+            # ConfigDumpInfo name="Catalog.X" — полное имя; сравниваем по хвосту
+            entry["uuid"] = None
+            for nm, u in {**m1, **m2}.items():
+                if nm.split(".")[-1] == stem:
+                    entry["uuid"] = u
+                    entry["name"] = nm
+                    break
             if k.endswith(".bsl"):
                 entry["classes"]["module"] = True
             elif "/Forms/" in k:
