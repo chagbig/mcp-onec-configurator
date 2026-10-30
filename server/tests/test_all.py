@@ -545,6 +545,154 @@ class TestFillShellAdopted(unittest.TestCase):
             self.assertEqual((r["added_tch"], r["added_attr"], r["inserted"]), (0, 0, 0))
 
 
+class TestStage15Forms(unittest.TestCase):
+    """Этап 15: fill_form — перенос изменённой формы как замещающей (Adopted)."""
+
+    U_CF1 = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+    U_EXT = "43e2f496-6d45-428c-b538-f6509f303265"
+
+    WRAPPER = ('<?xml version="1.0" encoding="UTF-8"?>'
+               '<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses">'
+               '<Form uuid="%s"><Properties>'
+               '<ObjectBelonging>Adopted</ObjectBelonging><Name>ФормаДокумента</Name>'
+               '<ExtendedConfigurationObject>%s</ExtendedConfigurationObject>'
+               '<FormType>Managed</FormType></Properties></Form></MetaDataObject>')
+
+    CONTENT_V1 = ('<?xml version="1.0" encoding="UTF-8"?>'
+                  '<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">'
+                  '<AutoCommandBar name="" id="-1"><ChildItems/></AutoCommandBar>'
+                  '<Attributes/></Form>')
+    CONTENT_V2 = ('<?xml version="1.0" encoding="UTF-8"?>'
+                  '<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">'
+                  '<AutoCommandBar name="" id="-1"><ChildItems/></AutoCommandBar>'
+                  '<Events><Event name="OnCreateAtServer">ПриСозданииНаСервере</Event></Events>'
+                  '<Attributes/></Form>')
+    MODULE = ("#Область ОбработчикиСобытийФормы\r\n\r\n&НаСервере\r\n"
+              "Процедура ПриСозданииНаСервере(Отказ, СтандартнаяОбработка)\r\n"
+              "\t// П15\r\nКонецПроцедуры\r\n\r\n#КонецОбласти\r\n")
+
+    def _stand(self, d: Path, content: str = CONTENT_V2, with_module: bool = True,
+               with_cf1: bool = True) -> tuple:
+        base = Path(d)
+        rel = Path("Documents") / "МсрТЧ43" / "Forms" / "ФормаДокумента"
+        src, dump1, dump2 = base / "src", base / "d1", base / "d2"
+        for root in (src, dump1, dump2):
+            (root / rel / "Ext" / "Form").mkdir(parents=True, exist_ok=True)
+        # оболочка от cfe-borrow: Adopted + ExtendedConfigurationObject=uuid cf1
+        (src / rel.parent / "ФормаДокумента.xml").write_text(
+            self.WRAPPER % (self.U_EXT, self.U_CF1), encoding="utf-8-sig")
+        (src / rel / "Ext" / "Form.xml").write_text(self.CONTENT_V1, encoding="utf-8-sig")
+        if with_cf1:
+            # MetaDataObject формы в cf1: uuid формы = U_CF1
+            (dump1 / rel.parent / "ФормаДокумента.xml").write_text(
+                self.WRAPPER % (self.U_CF1, self.U_CF1), encoding="utf-8-sig")
+        (dump2 / rel / "Ext" / "Form.xml").write_text(content, encoding="utf-8-sig")
+        if with_module:
+            (dump2 / rel / "Ext" / "Form" / "Module.bsl").write_text(
+                self.MODULE, encoding="utf-8-sig", newline="")  # как платформа: без трансляции EOL
+        return src, dump1, dump2
+
+    def test_form_transfer(self) -> None:
+        import tempfile
+        from build_ext import fill_form
+        with tempfile.TemporaryDirectory() as d:
+            src, dump1, dump2 = self._stand(Path(d))
+            r = fill_form(src, dump1, dump2, "Documents", "МсрТЧ43", "ФормаДокумента")
+            self.assertTrue(r["ok"], r)
+            self.assertEqual(r["cf1_uuid"], self.U_CF1)
+            self.assertEqual(r["ext_uuid"], self.U_EXT)
+            self.assertTrue(r["changed"])
+            rel = Path("Documents") / "МсрТЧ43" / "Forms" / "ФормаДокумента"
+            self.assertEqual((src / rel / "Ext" / "Form.xml").read_text(encoding="utf-8-sig"),
+                             self.CONTENT_V2)  # полный контент cf2, без урезаний
+            self.assertEqual((src / rel / "Ext" / "Form" / "Module.bsl").read_text(
+                encoding="utf-8-sig").replace("\r\n", "\n"),
+                self.MODULE.replace("\r\n", "\n"))
+
+    def test_idempotent_second_call(self) -> None:
+        import tempfile
+        from build_ext import fill_form
+        with tempfile.TemporaryDirectory() as d:
+            src, dump1, dump2 = self._stand(Path(d))
+            fill_form(src, dump1, dump2, "Documents", "МсрТЧ43", "ФормаДокумента")
+            rel = Path("Documents") / "МсрТЧ43" / "Forms" / "ФормаДокумента"
+            before = (src / rel / "Ext" / "Form.xml").read_text(encoding="utf-8-sig")
+            r = fill_form(src, dump1, dump2, "Documents", "МсрТЧ43", "ФормаДокумента")
+            self.assertTrue(r["ok"])
+            self.assertFalse(r["changed"])  # контент совпадает — перезаписи нет
+            self.assertEqual((src / rel / "Ext" / "Form.xml").read_text(encoding="utf-8-sig"),
+                             before)
+
+    def test_module_removed_when_absent_in_cf2(self) -> None:
+        import tempfile
+        from build_ext import fill_form
+        with tempfile.TemporaryDirectory() as d:
+            src, dump1, dump2 = self._stand(Path(d))
+            fill_form(src, dump1, dump2, "Documents", "МсрТЧ43", "ФормаДокумента")
+            rel = Path("Documents") / "МсрТЧ43" / "Forms" / "ФормаДокумента"
+            (dump2 / rel / "Ext" / "Form" / "Module.bsl").unlink()
+            r = fill_form(src, dump1, dump2, "Documents", "МсрТЧ43", "ФормаДокумента")
+            self.assertTrue(r["ok"])
+            self.assertTrue(r["changed"])
+            self.assertFalse((src / rel / "Ext" / "Form" / "Module.bsl").exists())
+
+    def test_no_cf1_original_rejected(self) -> None:
+        import tempfile
+        from build_ext import fill_form
+        with tempfile.TemporaryDirectory() as d:
+            src, dump1, dump2 = self._stand(Path(d), with_cf1=False)
+            r = fill_form(src, dump1, dump2, "Documents", "МсрТЧ43", "ФормаДокумента")
+            self.assertFalse(r["ok"])  # П15-4: новая форма — не заимствование
+            self.assertIn("ExtendedConfigurationObject", r["err"])
+
+    def test_broken_xml_rejected(self) -> None:
+        import tempfile
+        from build_ext import fill_form
+        with tempfile.TemporaryDirectory() as d:
+            src, dump1, dump2 = self._stand(Path(d))
+            rel = Path("Documents") / "МсрТЧ43" / "Forms" / "ФормаДокумента"
+            (dump2 / rel / "Ext" / "Form.xml").write_text("<Form><ChildItems>",
+                                                          encoding="utf-8-sig")
+            r = fill_form(src, dump1, dump2, "Documents", "МсрТЧ43", "ФормаДокумента")
+            self.assertFalse(r["ok"])  # П15-4: отказ ДО сборки, без traceback
+            self.assertIn("битый Form.xml", r["err"])
+
+    def test_wrapper_not_adopted_rejected(self) -> None:
+        import tempfile
+        from build_ext import fill_form
+        with tempfile.TemporaryDirectory() as d:
+            src, dump1, dump2 = self._stand(Path(d))
+            rel = Path("Documents") / "МсрТЧ43" / "Forms"
+            bad = self.WRAPPER % (self.U_EXT, self.U_CF1)
+            (src / rel / "ФормаДокумента.xml").write_text(
+                bad.replace("<ObjectBelonging>Adopted</ObjectBelonging>", ""),
+                encoding="utf-8-sig")
+            r = fill_form(src, dump1, dump2, "Documents", "МсрТЧ43", "ФормаДокумента")
+            self.assertFalse(r["ok"])
+
+    def test_norm_form_xml_canon(self) -> None:
+        from build_ext import _norm_form_xml
+        a = ('<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><AutoTime>CurrentOrLast</AutoTime>'
+             '<AutoCommandBar name="" id="-1"><ChildItems/></AutoCommandBar>'
+             '<Events><Event name="OnCreateAtServer" callType="Before">X</Event></Events></Form>')
+        b = ('<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">'
+             '<AutoCommandBar name="" id="-1"><ChildItems/></AutoCommandBar>'
+             '<Events><Event name="OnCreateAtServer">X</Event></Events></Form>')
+        self.assertEqual(_norm_form_xml(a), _norm_form_xml(b))  # канонизация платформы снята
+        c = b.replace("<ChildItems/>", "<ChildItems><Button/></ChildItems>")
+        self.assertNotEqual(_norm_form_xml(b), _norm_form_xml(c))  # содержательное — ловится
+
+    def test_forms_re_paths(self) -> None:
+        from build_ext import FORMS_RE
+        self.assertIsNotNone(FORMS_RE.match(
+            "Documents/МсрТЧ43/Forms/ФормаДокумента/Ext/Form.xml"))
+        self.assertIsNotNone(FORMS_RE.match(
+            "Documents/МсрТЧ43/Forms/ФормаДокумента/Ext/Form/Module.bsl"))
+        self.assertIsNone(FORMS_RE.match("Documents/МсрТЧ43/Forms/ФормаДокумента.xml"))
+        self.assertIsNone(FORMS_RE.match("CommonForms/МсрФормаСервер/Ext/Form.xml"))
+        self.assertIsNone(FORMS_RE.match("Documents/МсрТЧ43/Ext/ObjectModule.bsl"))
+
+
 class TestServerBuild(unittest.TestCase):
     def test_all_tools_registered(self) -> None:
         import asyncio

@@ -213,6 +213,101 @@ def fill_shell(shell_xml_path: Path, cf1_owner_xml: Path, cf2_owner_xml: Path,
             "inserted": len(inserts)}
 
 
+# каталоги-владельцы форм: <каталог>/<Объект>/Forms/<Форма>/Ext/Form.xml|Form/Module.bsl
+FORMS_RE = re.compile(
+    r"^(Documents|Catalogs|DataProcessors|Reports|Enums|InformationRegisters|"
+    r"AccumulationRegisters|ChartsOfAccounts|ChartsOfCharacteristicTypes|"
+    r"ExchangePlans|BusinessProcesses|Tasks)/([^/]+)/Forms/([^/]+)/"
+    r"Ext(?:/Form)?/(Form\.xml|Module\.bsl)$")
+DIR2RU = {"Documents": "Документ", "Catalogs": "Справочник", "DataProcessors": "Обработка",
+          "Reports": "Отчет", "Enums": "Перечисление",
+          "InformationRegisters": "РегистрСведений",
+          "AccumulationRegisters": "РегистрНакопления",
+          "ChartsOfAccounts": "ПланСчетов", "ChartsOfCharacteristicTypes": "ПланВидовХарактеристик",
+          "ExchangePlans": "ПланОбмена", "BusinessProcesses": "БизнесПроцесс",
+          "Tasks": "Задача"}
+
+
+def _norm_xml(text: str) -> bytes:
+    """Нормализованное дерево XML (канонизация платформой не влияет на сравнение)."""
+    import xml.etree.ElementTree as ET
+    body = re.sub(r"^<[?]xml[^>]*[?]>", "", text.strip())
+    return ET.tostring(ET.fromstring(body.encode("utf-8")))
+
+
+# платформа в замещающей форме расширения: свойства владельца-документа выкидывает
+# (держит их на владельце), у событий проставляет callType (семантика перехвата)
+_FORM_CANON_PROPS = ("AutoTime", "UsePostingMode", "RepostOnWrite")
+
+
+def _norm_form_xml(text: str) -> bytes:
+    """Нормализация Form.xml замещающей формы с учётом канонизации платформы
+    (П15-1: различия выгрузки расширения против cf2 — только _FORM_CANON_PROPS
+    и callType у событий; содержательная часть должна совпадать дословно)."""
+    import xml.etree.ElementTree as ET
+    body = re.sub(r"^<[?]xml[^>]*[?]>", "", text.strip())
+    root = ET.fromstring(body.encode("utf-8"))
+    for el in list(root):
+        if el.tag.split("}")[-1] in _FORM_CANON_PROPS:
+            root.remove(el)
+    for el in root.iter():
+        if el.tag.split("}")[-1] == "Event" and "callType" in el.attrib:
+            del el.attrib["callType"]
+    return ET.tostring(root)
+
+
+def fill_form(src: Path, dump1: Path, dump2: Path, dir_name: str, owner: str,
+              form: str) -> dict:
+    """Перенос формы как замещающей (этап 15, Г1): ОБОЛОЧКУ (wrapper Adopted +
+    ExtendedConfigurationObject) создаёт cfe-borrow -Object <Тип>.<Объект>.Form.<Форма>;
+    здесь в оболочку переносятся ПОЛНЫЙ контент Form.xml из cf2 (без урезаний
+    cfe-borrow) и модуль формы (Ext/Form/Module.bsl — канон выгрузки 8.3.27).
+    Идемпотентно: совпадающий контент не переписывается."""
+    base = Path(dir_name) / owner / "Forms" / form
+    src_xml = src / base / "Ext" / "Form.xml"
+    cf2_xml = dump2 / base / "Ext" / "Form.xml"
+    if not cf2_xml.is_file():
+        return {"ok": False, "err": "в cf2 нет Form.xml: %s" % base.as_posix()}
+    if not src_xml.is_file():
+        return {"ok": False, "err": "borrow не создал оболочку формы: %s" % src_xml}
+    # постусловие оболочки: Adopted + ссылка на uuid формы cf1
+    wrapper = src / base.parent / (form + ".xml")
+    w = wrapper.read_text(encoding="utf-8-sig") if wrapper.is_file() else ""
+    m1 = re.search(r"<Form[^>]*uuid=\"([0-9a-f-]{36})\"", w)
+    if "Adopted" not in w or "<ExtendedConfigurationObject>" not in w or not m1:
+        return {"ok": False, "err": "оболочка не Adopted/без ExtendedConfigurationObject: %s"
+                                     % wrapper.name}
+    cf1_uuid = (dump1 / base.parent / (form + ".xml")).read_text(encoding="utf-8-sig") \
+        if (dump1 / base.parent / (form + ".xml")).is_file() else ""
+    mcf1 = re.search(r"<Form[^>]*uuid=\"([0-9a-f-]{36})\"", cf1_uuid)
+    if not mcf1 or mcf1.group(1) != w.split("<ExtendedConfigurationObject>")[1].split("<")[0]:
+        return {"ok": False, "err": "ExtendedConfigurationObject != uuid формы cf1"}
+    out = {"ok": True, "ext_uuid": m1.group(1), "cf1_uuid": mcf1.group(1), "changed": False}
+    # контент: полный cf2-XML, идемпотентность по нормализованному дереву;
+    # битый XML (П15-4) — отказ ДО сборки, без traceback
+    try:
+        new_content = cf2_xml.read_text(encoding="utf-8-sig")
+        src_norm = _norm_xml(src_xml.read_text(encoding="utf-8-sig"))
+        cf2_norm = _norm_xml(new_content)
+    except Exception as e:  # ET.ParseError и родственные
+        return {"ok": False, "err": "битый Form.xml (%s): %s" % (base.as_posix(), e)}
+    if src_norm != cf2_norm:
+        src_xml.write_text(new_content, encoding="utf-8-sig")
+        out["changed"] = True
+    # модуль формы: cf2 — источник истины (в cf1 может не быть; тогда заглушка borrow удаляется)
+    cf2_mod = dump2 / base / "Ext" / "Form" / "Module.bsl"
+    src_mod = src / base / "Ext" / "Form" / "Module.bsl"
+    if cf2_mod.is_file():
+        mod = cf2_mod.read_text(encoding="utf-8-sig")
+        if not src_mod.is_file() or src_mod.read_text(encoding="utf-8-sig") != mod:
+            src_mod.write_text(mod, encoding="utf-8-sig")
+            out["changed"] = True
+    elif src_mod.is_file():
+        src_mod.unlink()
+        out["changed"] = True
+    return out
+
+
 def main(argv=None) -> int:
     import argparse
     ap = argparse.ArgumentParser(description="build_ext: расширение из пары cf (этап 14)")
@@ -325,12 +420,47 @@ def main(argv=None) -> int:
     step("наполнение", True, "вставок=%d, маппинг=%d" %
          (total_fill["inserted"], len(total_fill["mapping"])))
 
+    # 4a. формы: замещающие (этап 15) — изменённые формы объектов, существующих в cf1.
+    # Общие формы (CommonForms) и новые формы cf2 без оригинала — вне скоупа, в отчёт.
+    changed_paths = [e["path"] for e in fd["changed"]]
+    form_rels = {}
+    for path in changed_paths + list(fd["only2"]):
+        m = FORMS_RE.match(path)
+        if m:
+            form_rels[(m.group(1), m.group(2), m.group(3))] = True
+    report["forms_skipped"] = sorted(
+        p for p in changed_paths + list(fd["only2"]) if "/Forms/" in p and not FORMS_RE.match(p))
+    forms_report = []
+    for dir_name, owner, form in sorted(form_rels):
+        # П15-4: новая форма cf2 без оригинала в cf1 — вне скоупа (привязки не
+        # проверить), в отчёт, конвейер не роняем
+        if not (dump1 / dir_name / owner / "Forms" / (form + ".xml")).is_file():
+            report.setdefault("new_forms_cf2", []).append(
+                "%s.%s.%s" % (DIR2RU[dir_name], owner, form))
+            continue
+        target = "%s.%s.Form.%s" % (DIR2RU[dir_name], owner, form)
+        r = _sh([sys.executable, str(SKILLS / "cfe-borrow" / "scripts" / "cfe-borrow.py"),
+                 "-ExtensionPath", str(src), "-ConfigPath", str(dump2), "-Object", target])
+        if r.returncode != 0:
+            step("cfe-borrow " + target, False, (r.stdout + r.stderr)[-200:])
+            return 1
+        fr = fill_form(src, dump1, dump2, dir_name, owner, form)
+        if not fr["ok"]:
+            step("fill_form " + target, False, fr["err"])
+            return 1
+        forms_report.append({"dir": dir_name, "owner": owner, "form": form,
+                             "ext_uuid": fr["ext_uuid"], "cf1_uuid": fr["cf1_uuid"],
+                             "changed": fr["changed"]})
+        step("форма " + target, True, "uuid %s → %s" % (fr["cf1_uuid"][:8], fr["ext_uuid"][:8]))
+    report["forms"] = forms_report
+
     # 4b. перехватчики изменённых модулей (ИзменениеИКонтроль; источник — cf2,
     #     ловушка ГисМарк: собственный метод = имя оригинала висит клиент)
-    changed_paths = [e["path"] for e in fd["changed"]]
     for path in changed_paths + list(fd["only2"]):
         if not path.endswith(".bsl"):
             continue
+        if "/Forms/" in path:
+            continue  # модуль формы переносится ЦЕЛИКОМ (этап 15) — перехват не нужен
         owner = owner_of(path)
         if not owner or ".Форма." in path:
             continue
@@ -387,6 +517,30 @@ def main(argv=None) -> int:
         step("CheckModules", False, log[-200:])
         return 1
     _designer(slot, ["/UpdateDBCfg", "-Extension", a.name], work, "upd", timeout=900)
+    # 6b. постусловие форм (этап 15): платформа приняла замещающие формы —
+    # выгрузка расширения содержит контент cf2 (нормализованное сравнение)
+    if form_rels:
+        ext_dump = work / "dump-ext"
+        _designer(slot, ["/DumpConfigToFiles", str(ext_dump), "-Extension", a.name],
+                  work, "dumpext", timeout=1800)
+        for fr in forms_report:
+            base = Path(fr["dir"]) / fr["owner"] / "Forms" / fr["form"]
+            ext_xml = ext_dump / base / "Ext" / "Form.xml"
+            cf2_xml = dump2 / base / "Ext" / "Form.xml"
+            ok_xml = ext_xml.is_file() and \
+                _norm_form_xml(ext_xml.read_text(encoding="utf-8-sig")) == \
+                _norm_form_xml(cf2_xml.read_text(encoding="utf-8-sig"))
+            ext_mod = ext_dump / base / "Ext" / "Form" / "Module.bsl"
+            cf2_mod = dump2 / base / "Ext" / "Form" / "Module.bsl"
+            ok_mod = cf2_mod.is_file() == ext_mod.is_file() and (
+                not cf2_mod.is_file() or
+                cf2_mod.read_text(encoding="utf-8-sig") == ext_mod.read_text(encoding="utf-8-sig"))
+            if not (ok_xml and ok_mod):
+                step("постусловие формы " + fr["form"], False,
+                     "xml=%s mod=%s" % (ok_xml, ok_mod))
+                return 1
+        step("постусловие форм", True, "%d шт: контент cf2 в выгрузке расширения"
+             % len(forms_report))
     _designer(slot, ["/DumpCfg", str(work / (a.name + ".cfe")), "-Extension", a.name],
               work, "dumpcfe")
     cfe = work / (a.name + ".cfe")
