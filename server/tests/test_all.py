@@ -682,6 +682,29 @@ class TestStage15Forms(unittest.TestCase):
         c = b.replace("<ChildItems/>", "<ChildItems><Button/></ChildItems>")
         self.assertNotEqual(_norm_form_xml(b), _norm_form_xml(c))  # содержательное — ловится
 
+    def test_norm_form_xml_vendor_type_refs(self) -> None:
+        """П15-5: платформа в выгрузке расширения разворачивает ссылки на вендорские
+        типы в uuid (Type/TypeSet -> TypeId, Item — uuid). Сравнение структурное."""
+        from build_ext import _norm_form_xml
+        v8 = 'xmlns:v8="http://v8.1c.ru/8.1/data/core"'
+        cf2 = ('<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" %s>'
+               '<Attributes><Attribute name="Список" id="1"><Settings>'
+               '<Filter><ViewSettings><UserSettingsID/>'
+               '<Type>cfg:CatalogRef.Номенклатура</Type>'
+               '<TypeSet>cfg:DefinedType.Цена</TypeSet>'
+               '<Item>FunctionalOption.ИспользоватьХарактеристикиНоменклатуры</Item>'
+               '</ViewSettings></Filter></Settings></Attribute></Attributes></Form>' % v8)
+        ext = ('<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" %s>'
+               '<Attributes><Attribute name="Список" id="1"><Settings>'
+               '<Filter><ViewSettings><UserSettingsID/>'
+               '<TypeId>190a7469-3325-4d33-b5ec-28a63ac83b06</TypeId>'
+               '<TypeId>eefd8557-e29c-43fd-87f1-9c69afa7aa83</TypeId>'
+               '<Item>6c8550bb-f6df-4d47-bbea-cfbc7c362006</Item>'
+               '</ViewSettings></Filter></Settings></Attribute></Attributes></Form>' % v8)
+        self.assertEqual(_norm_form_xml(cf2), _norm_form_xml(ext))
+        other = ext.replace("name=\"Список\"", "name=\"Другой\"")
+        self.assertNotEqual(_norm_form_xml(ext), _norm_form_xml(other))
+
     def test_forms_re_paths(self) -> None:
         from build_ext import FORMS_RE
         self.assertIsNotNone(FORMS_RE.match(

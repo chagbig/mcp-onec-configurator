@@ -236,14 +236,17 @@ def _norm_xml(text: str) -> bytes:
 
 
 # платформа в замещающей форме расширения: свойства владельца-документа выкидывает
-# (держит их на владельце), у событий проставляет callType (семантика перехвата)
+# (держит их на владельце), у Event/Action проставляет callType (семантика перехвата),
+# ссылки на вендорские типы разворачивает в uuid с переименованием тега
+# (Type/TypeSet -> TypeId; Item функциональных опций — тоже uuid) — П15-5
 _FORM_CANON_PROPS = ("AutoTime", "UsePostingMode", "RepostOnWrite")
+_FORM_CANON_REF_TAGS = ("Type", "TypeSet", "TypeId", "Item")
 
 
 def _norm_form_xml(text: str) -> bytes:
-    """Нормализация Form.xml замещающей формы с учётом канонизации платформы
-    (П15-1: различия выгрузки расширения против cf2 — только _FORM_CANON_PROPS
-    и callType у событий; содержательная часть должна совпадать дословно)."""
+    """Нормализация Form.xml замещающей формы с учётом канонизации платформы.
+    Ссылки на типы сравниваются структурно: корректность ссылок проверяет сама
+    загрузка (платформа разрешила имена), постусловие ловит потерю содержимого."""
     import xml.etree.ElementTree as ET
     body = re.sub(r"^<[?]xml[^>]*[?]>", "", text.strip())
     root = ET.fromstring(body.encode("utf-8"))
@@ -251,8 +254,14 @@ def _norm_form_xml(text: str) -> bytes:
         if el.tag.split("}")[-1] in _FORM_CANON_PROPS:
             root.remove(el)
     for el in root.iter():
-        if el.tag.split("}")[-1] == "Event" and "callType" in el.attrib:
-            del el.attrib["callType"]
+        for attr in [a for a in el.attrib if a == "callType" or a.endswith("}callType")]:
+            del el.attrib[attr]
+        tag = el.tag.split("}")[-1]
+        if tag in ("Type", "TypeSet", "TypeId"):
+            head, _, _ = el.tag.rpartition("}")
+            el.tag = head + "}REF" if head else "REF"
+        if tag in _FORM_CANON_REF_TAGS:
+            el.text = None
     return ET.tostring(root)
 
 
