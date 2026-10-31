@@ -14,7 +14,8 @@ python build_ext.py <cf1=вендор> <cf2=доработанная> --name М�
 5. cfe-validate (скил).
 6. Слот cf1: /LoadConfigFromFiles -Extension → /CheckModules -Extension →
    /UpdateDBCfg -Extension → /DumpCfg -Extension → cfe-артефакт.
-7. Верификации: вендор цел (записи cf1 == основная конфигурация слота по хешам),
+7. Верификации: вендор цел (снимок слота до/после загрузки расширения — загрузка
+   расширения не изменила основную конфигурацию),
    переносимое из diff присутствует в cfe.
 
 Отчёт: report.json (переносимое, непереносимое, маппинг имён, артефакт).
@@ -519,6 +520,11 @@ def main(argv=None) -> int:
         if r.returncode != 0:
             step("слот cf1", False, r.stdout[-200:])
             return 1
+    # базовый снимок ДО загрузки расширения: вендор цел = загрузка расширения не
+    # изменила основную конфигурацию (сравнение с cf1 напрямую ложно падает —
+    # круг «cf -> слот» пересохраняет служебные записи, П15-5: 32 из 45355)
+    baseline = work / "slot-baseline.cf"
+    _designer(slot, ["/DumpCfg", str(baseline)], work, "dumpbaseline", timeout=1800)
     _designer(slot, ["/LoadConfigFromFiles", str(src), "-Extension", a.name],
               work, "load", timeout=900)
     _, log = _designer(slot, ["/CheckModules", "-Extension", a.name], work, "check")
@@ -566,8 +572,8 @@ def main(argv=None) -> int:
                     if not re.match(r"^(configinfo|version|versions|deleted|root)$", r["name"])}
     main_cf = work / "slot-main.cf"
     _designer(slot, ["/DumpCfg", str(main_cf)], work, "dumpmain")
-    vendor_ok = inv(a.cf1) == inv(str(main_cf))
-    step("вендор цел", vendor_ok, "записей cf1: %d" % len(inv(a.cf1)))
+    vendor_ok = inv(str(baseline)) == inv(str(main_cf))
+    step("вендор цел", vendor_ok, "записей: %d (слот до/после расширения)" % len(inv(str(baseline))))
 
     report["fill"] = total_fill
     report["manual"] = rep["verdicts"]["manual"]
