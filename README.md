@@ -25,7 +25,7 @@ mcp-snegopat (Python, mcp>=2.3)          server/mcp_snegopat/
 | Что | Где | Назначение |
 |---|---|---|
 | Мост (аддин JScript) | `bridge/mcp_bridge.js` → `Y:\Snegopat-mcp\x64\modules\snegopat\addins\mcp\` | реестр сессий, диспетчер операций, идемпотентность по id, статусы running, автоответ только знакомым диалогам |
-| MCP-сервер (Python, stdio) | `server/` (пакет `mcp_snegopat`, `pip install -e server`) | 41 инструмент (метаданные, модули, формы XML, расширения), конфиг разрешений, таймауты, журнал вызовов |
+| MCP-сервер (Python, stdio) | `server/` (пакет `mcp_snegopat`, `pip install -e server`) | 42 инструмента (метаданные, модули, формы XML, расширения, конвейер build_ext), конфиг разрешений, таймауты, журнал вызовов |
 | Тесты | `server/tests/` | 27 юнит-тестов на подставном мосте, stdio-смоук, живой e2e-прогон |
 | Документация | `docs/` | план, отчёты этапов |
 
@@ -59,6 +59,12 @@ python server/tools/build_ext.py <cf1> <cf2> --name МсрДиф --prefix Мср
 `cf_diff.py` (сравнение двух cf, XML-канон), `form_text.py` (нормализатор текста форм),
 `mockup_init.py`, `mcp_to_line.py`. Подробности: `docs/stage-13-extensions.md`,
 `docs/stage-14-cf-diff-ext.md`, `docs/stage-15-forms-in-ext.md`.
+
+MCP-инструмент `ext_build_from_cf` (этап 16) — тот же конвейер одной командой агента
+(cf1, cf2, name, prefix; малые пары — минуты, 2 ГБ — ~50 мин). Доставка cfe в линию —
+`mcp_to_line.py --cfe <файл> --ext-name <Имя> --line-base <база>`: Load/Check/Update
+-Extension + постусловие «записи cfe == снятой копии» (молчаливый пропуск
+несуществующего имени отсечён).
 
 ## Установка
 

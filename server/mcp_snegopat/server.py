@@ -711,6 +711,50 @@ class Toolkit:
         return {"file": out, "size": _os.path.getsize(out), "res": res,
                 "open_status": open_status}
 
+    def ext_build_from_cf(self, cf1: str, cf2: str, name: str, prefix: str,
+                          work: str = "", timeout_s: int = 7200) -> dict:
+        """Собрать расширение из сравнения двух cf (конвейер этапов 14–15):
+        cf_diff (XML-канон платформы) -> cfe-init -> cfe-borrow изменённых
+        владельцев -> наполнение (Adopted-реквизиты с префиксом, замещающие формы
+        с полным контентом) -> перехватчики модулей -> загрузка в слот -> cfe +
+        отчёт. cf1 — вендорский эталон, cf2 — доработанная. ДОЛГАЯ операция:
+        малые пары — минуты, 2 ГБ — ~50 мин (timeout_s >= 3600). work — рабочий
+        каталог (повторный вызов на том же work идемпотентен). Непереносимое —
+        в отчёте: manual (cf_diff), new_forms_cf2, new_objects_cf2."""
+        import json as _json
+        import subprocess as _sp
+        import sys as _sys
+        from pathlib import Path as _P
+        if not name or not prefix:
+            raise BridgeError("bad_args", "name и prefix обязательны")
+        p1, p2 = _P(cf1), _P(cf2)
+        for p in (p1, p2):
+            if not p.is_file() or p.stat().st_size < 1000:
+                raise BridgeError("bad_args", f"cf не найден: {p}")
+        w = _P(work) if work else _P(r"Y:\Snegopat-mcp\verify\build-ext-mcp") / name
+        script = _P(__file__).resolve().parents[1] / "tools" / "build_ext.py"
+        try:
+            r = _sp.run([_sys.executable, str(script), str(p1), str(p2),
+                         "--name", name, "--prefix", prefix, "--work", str(w)],
+                        capture_output=True, text=True, timeout=timeout_s)
+        except _sp.TimeoutExpired:
+            raise BridgeError(
+                "build_ext_failed",
+                f"таймаут {timeout_s} с — увеличьте timeout_s (2 ГБ пара ~50 мин)")
+        out = (r.stdout or "") + (r.stderr or "")
+        report_file = w / "report.json"
+        if r.returncode != 0:
+            tail = "\n".join(out.strip().splitlines()[-6:])
+            raise BridgeError("build_ext_failed", tail[:1500])
+        report = {}
+        if report_file.is_file():
+            report = _json.loads(report_file.read_text(encoding="utf-8"))
+        return {"cfe": report.get("cfe"), "vendor_ok": report.get("vendor_ok"),
+                "steps": report.get("steps", [])[-8:], "forms": report.get("forms", []),
+                "new_forms_cf2": report.get("new_forms_cf2", []),
+                "new_objects_cf2": report.get("new_objects_cf2"),
+                "manual": report.get("manual"), "report": str(report_file)}
+
     def ext_save(self, session: int, name: str) -> dict:
         """Сохранить расширение (штатное «Сохранить документ» при активном дереве
         расширения — Frame.FileSave). Проверено живьём (28.10.2026): isModified → False,
@@ -972,6 +1016,7 @@ _TOOLS = [
     "cfgstore_capture", "cfgstore_commit",
     "form_export", "form_import", "form_get_xml", "form_set_xml",
     "ext_list", "ext_dump_cfe", "ext_save", "ext_create", "ext_open",
+    "ext_build_from_cf",
     "tree_activate", "tree_activate_group", "dialog_probe",
     "bridge_wait", "bridge_stats", "focus_probe",
 ]

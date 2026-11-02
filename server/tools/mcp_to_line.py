@@ -1,7 +1,13 @@
-"""Handoff «живая база -> cf -> база линии» (этап 12, шаг Л1).
+"""Handoff «живая база -> cf -> база линии» (этап 12, шаг Л1) и доставка cfe
+расширения в базу линии (этап 16).
 
+Режим 1 (правки живой базы):
 python server/tools/mcp_to_line.py --live-base <путь> --line-base <путь> \
     --objects "Справочник.Х,Справочник.Х.Реквизит.У" [--dir <verify>] [--timeout 1800]
+
+Режим 2 (готовый cfe расширения, этап 16 — замыкает цикл build_ext → линия):
+python server/tools/mcp_to_line.py --cfe <файл.cfe> --ext-name <Имя> \
+    --line-base <путь> [--dir <verify>] [--timeout 1800]
 
 Шаги (каждая команда конфигуратора — ОТДЕЛЬНЫЙ вызов процесса; склейка в одном
 вызове зависала намертво, находка П2 этапа 12):
@@ -12,6 +18,11 @@ python server/tools/mcp_to_line.py --live-base <путь> --line-base <путь>
      /DumpConfigToFiles -listFile. Вердикт каждого шага: код возврата + /DumpResult
      + отсутствие фатальных фраз в логе + постусловие (res-файл/выгрузка).
   4. Постусловие: каждый объект из --objects присутствует в выгрузке.
+
+Режим 2: /LoadCfg <cfe> -Extension <Имя> -> /CheckModules -Extension ->
+/UpdateDBCfg -Extension -> /DumpCfg <копия> -Extension; постусловие — записи cfe
+и снятой копии совпадают по хешам (cf_inspect; схема П14-5, «несуществующее имя в
+-Extension — молчаливый пропуск rc=0» отсечено именно постусловием).
 
 База-макет — только непривязанная (на привязанной Insert/Delete не работают,
 25.10.2026) и чистая: cf увозит ВСЮ её конфигурацию.
@@ -65,7 +76,7 @@ def run_designer(args: list[str], out_log: Path, res_file: Path,
     res = res_file.read_text(encoding="utf-8-sig").strip() if res_file.is_file() else ""
     if res and res.lstrip("﻿") != "0":
         return False, f"/DumpResult = {res}"
-    log = out_log.read_text(encoding="utf-16-le", errors="replace") if out_log.is_file() else ""
+    log = out_log.read_text(encoding="utf-8-sig", errors="replace") if out_log.is_file() else ""
     for phrase in FATAL_PHRASES:
         if phrase in log:
             return False, f"фатальная фраза в логе: {phrase!r}"
@@ -92,20 +103,22 @@ def session_for_base(tk: Toolkit, live_base: Path) -> int:
         "(starter.exe + 1cv8.exe без /DisableStartupDialogs)")
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--live-base", required=True, help="непривязанная база-макет с правками")
-    ap.add_argument("--line-base", required=True, help="база линии (закрыта, не привязана)")
-    ap.add_argument("--objects", required=True,
-                    help="объекты постусловия через запятую (имена для -listFile)")
-    ap.add_argument("--dir", default=r"Y:\Snegopat-mcp\verify\mcp_to_line",
-                    help="рабочий каталог выгрузок/логов")
-    ap.add_argument("--timeout", type=float, default=1800, help="лимит одного вызова, с")
-    a = ap.parse_args()
-
-    live_base, line_base = Path(a.live_base), Path(a.line_base)
-    work = Path(a.dir)
-    work.mkdir(parents=True, exist_ok=True)
+def check_args(a: argparse.Namespace) -> None:
+    """Валидация аргументов (этап 16: два режима, взаимно исключающие)."""
+    if not a.live_base and not a.cfe:
+        raise SystemExit("нужен один из --live-base (режим cf) или --cfe (режим расширения)")
+    if a.cfe and a.live_base:
+        raise SystemExit("--cfe и --live-base взаимоисключающие")
+    if a.cfe:
+        if not a.ext_name:
+            raise SystemExit("--cfe требует --ext-name")
+        if not Path(a.cfe).is_file() or Path(a.cfe).stat().st_size < 100:
+            raise SystemExit(f"--cfe не найден или пуст: {a.cfe}")
+        if a.objects:
+            raise SystemExit("--objects в режиме --cfe не используется (постусловие — хеши записей)")
+        return
+    if not a.objects:
+        raise SystemExit("--objects обязателен в режиме --live-base")
     objects = [o.strip() for o in a.objects.split(",") if o.strip()]
     if not objects:
         raise SystemExit("--objects пуст")
@@ -116,6 +129,93 @@ def main() -> int:
         if len(obj.split(".")) != 2:
             raise SystemExit(f"--objects: «{obj}» — ожидается объект верхнего уровня "
                              "вида «Вид.Имя»; подчинённые проверяйте чтением XML родителя")
+
+
+def cfe_records_equal(p1: Path, p2: Path) -> tuple[bool, str]:
+    """Постусловие доставки cfe (этап 16, схема П14-5): наборы записей и их хеши.
+    Несуществующее имя в -Extension даёт МОЛЧАЛИВЫЙ пропуск rc=0 — отсекается здесь."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from cf_inspect import CfFile  # noqa: E402
+    import hashlib  # noqa: E402
+
+    def inv(p: Path) -> dict:
+        with CfFile(str(p)) as cf:
+            return {r["name"]: hashlib.sha1(cf.read(r)).hexdigest() for r in cf.records()}
+    a, b = inv(p1), inv(p2)
+    if a == b:
+        return True, "записей %d, байт-в-байт" % len(a)
+    diff = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
+    return False, "записей %d/%d, расходятся: %s" % (len(a), len(b), [d[:16] for d in diff[:6]])
+
+
+def cfe_delivery(a: argparse.Namespace, line_base: Path, work: Path) -> int:
+    """Режим 2 (этап 16): готовый cfe → база линии. Последовательные вызовы
+    (НЕ склейкой); постусловие — записи cfe == записи снятой копии расширения
+    (молчаливый пропуск несуществующего имени в -Extension отсекается здесь)."""
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    results: list[dict] = []
+
+    def step(name: str, ok: bool, info: str) -> bool:
+        results.append({"step": name, "ok": ok, "info": info})
+        print(f"{'ok  ' if ok else 'FAIL'} {name}: {info}", flush=True)
+        return ok
+
+    cfe = Path(a.cfe)
+    step("cfe", cfe.is_file(), f"{cfe} {cfe.stat().st_size} байт")
+
+    delivered = work / f"delivered-{a.ext_name}.cfe"
+    delivered.unlink(missing_ok=True)  # прошлый прогон дал бы ложное «ок» постусловия
+    runs = [
+        ("LoadCfgExt", ["/LoadCfg", str(cfe), "-Extension", a.ext_name]),
+        ("CheckModulesExt", ["/CheckModules", "-Extension", a.ext_name]),
+        ("UpdateDBCfgExt", ["/UpdateDBCfg", "-Extension", a.ext_name]),
+        ("DumpCfgExt", ["/DumpCfg", str(delivered), "-Extension", a.ext_name]),
+    ]
+    for name, args in runs:
+        ok, info = run_designer(["/F", str(line_base)] + args,
+                                work / f"{name}-{stamp}.log", work / f"{name}-{stamp}.res",
+                                a.timeout)
+        if not step(f"база линии: {name}", ok, info):
+            return finish(results, work, stamp)
+        if name == "CheckModulesExt":
+            log = (work / f"{name}-{stamp}.log").read_text(encoding="utf-8-sig",
+                                                           errors="replace") \
+                if (work / f"{name}-{stamp}.log").is_file() else ""
+            ok_log = "не обнаружено" in log or "Синтаксических ошибок" in log
+            if not step("CheckModules: синтаксис", ok_log, log[-160:]):
+                return finish(results, work, stamp)
+
+    if not delivered.is_file() or delivered.stat().st_size == 0:
+        step("постусловие: копия расширения", False,
+             f"{delivered} не создан (расширение не загрузилось?)")
+        return finish(results, work, stamp)
+    ok, info = cfe_records_equal(cfe, delivered)
+    step("постусловие: записи cfe == копии", ok, info)
+    return finish(results, work, stamp)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--live-base", default="", help="режим 1: непривязанная база-макет с правками")
+    ap.add_argument("--cfe", default="", help="режим 2: готовый cfe расширения")
+    ap.add_argument("--ext-name", default="", help="режим 2: имя расширения для -Extension")
+    ap.add_argument("--line-base", required=True, help="база линии (закрыта, не привязана)")
+    ap.add_argument("--objects", default="",
+                    help="режим 1: объекты постусловия через запятую (имена для -listFile)")
+    ap.add_argument("--dir", default=r"Y:\Snegopat-mcp\verify\mcp_to_line",
+                    help="рабочий каталог выгрузок/логов")
+    ap.add_argument("--timeout", type=float, default=1800, help="лимит одного вызова, с")
+    a = ap.parse_args()
+    check_args(a)
+
+    line_base = Path(a.line_base)
+    work = Path(a.dir)
+    work.mkdir(parents=True, exist_ok=True)
+
+    if a.cfe:
+        return cfe_delivery(a, line_base, work)
+    live_base = Path(a.live_base)
+    objects = [o.strip() for o in a.objects.split(",") if o.strip()]
 
     tk = Toolkit(load_config())
     stamp = time.strftime("%Y%m%d-%H%M%S")

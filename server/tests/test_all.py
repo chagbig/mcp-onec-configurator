@@ -716,6 +716,76 @@ class TestStage15Forms(unittest.TestCase):
         self.assertIsNone(FORMS_RE.match("Documents/МсрТЧ43/Ext/ObjectModule.bsl"))
 
 
+class TestExtBuildFromCf(Base):
+    """Этап 16: MCP-инструмент ext_build_from_cf — валидация аргументов."""
+
+    def test_missing_cf_rejected(self) -> None:
+        from mcp_snegopat.bridge import BridgeError
+        with self.assertRaises(BridgeError) as cm:
+            self.tk.ext_build_from_cf(str(self.root / "нет.cf"), str(self.root / "нет2.cf"),
+                                      "МсрД16", "Мср16_")
+        self.assertIn("cf не найден", str(cm.exception))
+
+    def test_empty_name_rejected(self) -> None:
+        from mcp_snegopat.bridge import BridgeError
+        with self.assertRaises(BridgeError) as cm:
+            self.tk.ext_build_from_cf("x.cf", "y.cf", "", "")
+        self.assertIn("name и prefix", str(cm.exception))
+
+
+class TestMcpToLineCfe(unittest.TestCase):
+    """Этап 16: режим 2 mcp_to_line (--cfe/--ext-name) — валидация."""
+
+    ARGS = dict(line_base="L", dir="D", timeout=10.0)
+
+    def _ns(self, **kw):
+        import argparse
+        base = dict(self.ARGS)
+        base.update(kw)
+        return argparse.Namespace(**base)
+
+    def test_cfe_requires_ext_name(self) -> None:
+        from mcp_to_line import check_args
+        with self.assertRaises(SystemExit):
+            check_args(self._ns(cfe="x.cfe", ext_name="", live_base="", objects=""))
+
+    def test_cfe_and_live_mutually_exclusive(self) -> None:
+        from mcp_to_line import check_args
+        with self.assertRaises(SystemExit):
+            check_args(self._ns(cfe="x.cfe", ext_name="М", live_base="B", objects=""))
+
+    def test_cfe_missing_file(self) -> None:
+        import tempfile
+        from mcp_to_line import check_args
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(SystemExit):
+                check_args(self._ns(cfe=str(Path(d) / "нет.cfe"), ext_name="М",
+                                    live_base="", objects=""))
+
+    def test_objects_rejected_in_cfe_mode(self) -> None:
+        import tempfile
+        from mcp_to_line import check_args
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "x.cfe"
+            f.write_bytes(b"0" * 200)
+            with self.assertRaises(SystemExit):
+                check_args(self._ns(cfe=str(f), ext_name="М", live_base="",
+                                    objects="Справочник.Х"))
+
+    def test_cfe_mode_valid(self) -> None:
+        import tempfile
+        from mcp_to_line import check_args
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "x.cfe"
+            f.write_bytes(b"0" * 200)
+            check_args(self._ns(cfe=str(f), ext_name="М", live_base="", objects=""))
+
+    def test_live_mode_requires_objects(self) -> None:
+        from mcp_to_line import check_args
+        with self.assertRaises(SystemExit):
+            check_args(self._ns(cfe="", ext_name="", live_base="B", objects=""))
+
+
 class TestServerBuild(unittest.TestCase):
     def test_all_tools_registered(self) -> None:
         import asyncio
