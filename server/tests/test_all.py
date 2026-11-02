@@ -732,6 +732,78 @@ class TestExtBuildFromCf(Base):
             self.tk.ext_build_from_cf("x.cf", "y.cf", "", "")
         self.assertIn("name и prefix", str(cm.exception))
 
+    def test_work_lock_rejects_parallel(self) -> None:
+        """Ревью M9: существующий lock — отказ, чужая сборка не портится."""
+        import tempfile
+        from mcp_snegopat.bridge import BridgeError
+        with tempfile.TemporaryDirectory() as d:
+            cf1, cf2 = Path(d) / "a.cf", Path(d) / "b.cf"
+            cf1.write_bytes(b"0" * 2000)
+            cf2.write_bytes(b"0" * 2000)
+            w = Path(d) / "w"
+            w.mkdir()
+            (w / ".build-ext.lock").write_text("999999")
+            with self.assertRaises(BridgeError) as cm:
+                self.tk.ext_build_from_cf(str(cf1), str(cf2), "МсрД16", "Мср16_",
+                                          work=str(w), timeout_s=5)
+            self.assertIn("занят", str(cm.exception))
+
+
+class TestCollectFormTargets(unittest.TestCase):
+    """Ревью C1: детект форм видит УДАЛЁННЫЕ файлы форм (only1)."""
+
+    def test_module_deleted_in_only1_detected(self) -> None:
+        from build_ext import collect_form_targets
+        rels, deleted = collect_form_targets(
+            changed=[], only2=[],
+            only1=["Documents/МсрТЧ43/Forms/ФормаДокумента/Ext/Form/Module.bsl"])
+        self.assertEqual(rels, {("Documents", "МсрТЧ43", "ФормаДокумента"): True})
+        self.assertEqual(deleted,
+                         ["Documents/МсрТЧ43/Forms/ФормаДокумента/Ext/Form/Module.bsl"])
+
+    def test_changed_and_new_forms(self) -> None:
+        from build_ext import collect_form_targets
+        rels, deleted = collect_form_targets(
+            changed=["Documents/X/Forms/F1/Ext/Form.xml"],
+            only2=["Catalogs/Y/Forms/F2/Ext/Form/Module.bsl"], only1=[])
+        self.assertEqual(rels, {("Documents", "X", "F1"): True,
+                                ("Catalogs", "Y", "F2"): True})
+        self.assertEqual(deleted, [])
+
+    def test_non_form_paths_ignored(self) -> None:
+        from build_ext import collect_form_targets
+        rels, deleted = collect_form_targets(
+            changed=["Documents/X/Ext/ObjectModule.bsl",
+                     "CommonForms/МсрФормаСервер/Ext/Form.xml"],
+            only2=["Documents/X/Forms/ФормаДокумента.xml"], only1=[])
+        self.assertEqual(rels, {})
+        self.assertEqual(deleted, [])
+
+
+class TestDesignerVerdict(unittest.TestCase):
+    """Ревью M6: отсутствующий/пустой /DumpResult — отказ, не успех."""
+
+    def test_missing_res_rejected(self) -> None:
+        from mcp_to_line import designer_verdict
+        ok, info = designer_verdict(0, "", "")
+        self.assertFalse(ok)
+        self.assertIn("отсутствует", info)
+
+    def test_res_nonzero_rejected(self) -> None:
+        from mcp_to_line import designer_verdict
+        self.assertFalse(designer_verdict(0, "1", "")[0])
+
+    def test_ok(self) -> None:
+        from mcp_to_line import designer_verdict
+        ok, info = designer_verdict(0, "0", "Синтаксических ошибок не обнаружено!")
+        self.assertTrue(ok)
+
+    def test_fatal_phrase_rejected(self) -> None:
+        from mcp_to_line import designer_verdict
+        ok, info = designer_verdict(0, "0", "Ошибка при выгрузке")
+        self.assertFalse(ok)
+        self.assertIn("фатальная", info)
+
 
 class TestMcpToLineCfe(unittest.TestCase):
     """Этап 16: режим 2 mcp_to_line (--cfe/--ext-name) — валидация."""

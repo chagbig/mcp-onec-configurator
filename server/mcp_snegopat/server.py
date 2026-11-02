@@ -733,17 +733,42 @@ class Toolkit:
                 raise BridgeError("bad_args", f"cf не найден: {p}")
         w = _P(work) if work else _P(r"Y:\Snegopat-mcp\verify\build-ext-mcp") / name
         script = _P(__file__).resolve().parents[1] / "tools" / "build_ext.py"
+        # ревью M9: один work — одна сборка (параллельные портили бы слоты/src/отчёт);
+        # открытие "x" — атомарное создание: существующий lock = чужая сборка
+        import os as _os
+        w.mkdir(parents=True, exist_ok=True)
+        lock = w / ".build-ext.lock"
         try:
-            r = _sp.run([_sys.executable, str(script), str(p1), str(p2),
-                         "--name", name, "--prefix", prefix, "--work", str(w)],
-                        capture_output=True, text=True, timeout=timeout_s)
-        except _sp.TimeoutExpired:
+            with open(lock, "x", encoding="utf-8") as fh:
+                fh.write(str(_os.getpid()))
+        except FileExistsError:
             raise BridgeError(
-                "build_ext_failed",
-                f"таймаут {timeout_s} с — увеличьте timeout_s (2 ГБ пара ~50 мин)")
-        out = (r.stdout or "") + (r.stderr or "")
+                "build_ext_busy",
+                f"work занят другой сборкой ({lock}); если процесс умер — удалите lock")
+        try:
+            # ревью M7: subprocess.run(timeout) снимает только прямого потомка —
+            # внук 1cv8.exe продолжал бы менять слот; снимаем всё дерево
+            p = _sp.Popen([_sys.executable, str(script), str(p1), str(p2),
+                           "--name", name, "--prefix", prefix, "--work", str(w)],
+                          stdout=_sp.PIPE, stderr=_sp.PIPE, text=True,
+                          encoding="utf-8", errors="replace")
+            try:
+                out, err = p.communicate(timeout=timeout_s)
+            except _sp.TimeoutExpired:
+                _sp.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
+                p.wait()
+                raise BridgeError(
+                    "build_ext_failed",
+                    f"таймаут {timeout_s} с — дерево процессов снято (taskkill /T); "
+                    "увеличьте timeout_s (2 ГБ пара ~50 мин)")
+        finally:
+            try:
+                lock.unlink()
+            except OSError:
+                pass
+        out = (out or "") + (err or "")
         report_file = w / "report.json"
-        if r.returncode != 0:
+        if p.returncode != 0:
             tail = "\n".join(out.strip().splitlines()[-6:])
             raise BridgeError("build_ext_failed", tail[:1500])
         report = {}
@@ -753,6 +778,8 @@ class Toolkit:
                 "steps": report.get("steps", [])[-8:], "forms": report.get("forms", []),
                 "new_forms_cf2": report.get("new_forms_cf2", []),
                 "new_objects_cf2": report.get("new_objects_cf2"),
+                "deleted_forms_cf2": report.get("deleted_forms_cf2", []),
+                "warning": report.get("warning"),
                 "manual": report.get("manual"), "report": str(report_file)}
 
     def ext_save(self, session: int, name: str) -> dict:

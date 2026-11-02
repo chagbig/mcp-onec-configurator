@@ -227,6 +227,30 @@ DIR2RU = {"Documents": "Документ", "Catalogs": "Справочник", "
           "ChartsOfAccounts": "ПланСчетов", "ChartsOfCharacteristicTypes": "ПланВидовХарактеристик",
           "ExchangePlans": "ПланОбмена", "BusinessProcesses": "БизнесПроцесс",
           "Tasks": "Задача"}
+RU2DIR = {v: k for k, v in DIR2RU.items()}
+RU2EN = {"Документ": "Document", "Справочник": "Catalog", "Обработка": "DataProcessor",
+         "Отчет": "Report", "Перечисление": "Enum", "РегистрСведений": "InformationRegister",
+         "РегистрНакопления": "AccumulationRegister", "ПланСчетов": "ChartOfAccounts",
+         "ПланВидовХарактеристик": "ChartOfCharacteristicTypes",
+         "ПланОбмена": "ExchangePlan", "БизнесПроцесс": "BusinessProcess", "Задача": "Task"}
+
+
+def collect_form_targets(changed: list, only2: list, only1: list) -> tuple[dict, list]:
+    """Детект форм (этап 15 + ревью C1): FORMS_RE по изменённым, новым И удалённым
+    путям. Возвращает (form_rels {(dir, owner, form): True}, deleted_paths) —
+    форму с удалённым в cf2 файлом (например только Module.bsl) надо пропустить
+    через fill_form, чтобы она в src привелась к cf2 (модуль снялся); полную
+    форму, которой нет в cf2, вызывающий уводит в отчёт."""
+    rels: dict = {}
+    deleted: list = []
+    for path in list(changed) + list(only2) + list(only1):
+        m = FORMS_RE.match(path)
+        if not m:
+            continue
+        rels[(m.group(1), m.group(2), m.group(3))] = True
+        if path in only1:
+            deleted.append(path)
+    return rels, deleted
 
 
 def _norm_xml(text: str) -> bytes:
@@ -331,6 +355,24 @@ def main(argv=None) -> int:
     work.mkdir(parents=True, exist_ok=True)
     report = {"cf1": a.cf1, "cf2": a.cf2, "name": a.name, "steps": []}
 
+    # ревью C2 (fail fast): слот на work собирается по КОНКРЕТНОМУ cf1 — повторный
+    # прогон другой пары на том же work со старым слотом валидировал бы расширение
+    # против чужого вендора; проверка ДО diff/borrow, чтобы не делать лишнюю работу
+    origin = {"cf1": str(Path(a.cf1).resolve()).lower(),
+              "size": Path(a.cf1).stat().st_size}
+    slot_marker = work / "slot-cf1.origin.json"
+    if slot_marker.is_file():
+        prev = json.loads(slot_marker.read_text(encoding="utf-8"))
+        if prev != origin:
+            print("FAIL слот cf1: work собран по другому cf1 (%s, %s б) — "
+                  "укажите чистый --work" % (prev.get("cf1"), prev.get("size")),
+                  flush=True)
+            report["steps"].append({"step": "слот cf1", "ok": False,
+                                    "info": "другой cf1 на том же work"})
+            (work / "report.json").write_text(json.dumps(report, ensure_ascii=False,
+                                                         indent=1), encoding="utf-8")
+            return 1
+
     def step(name, ok, info):
         report["steps"].append({"step": name, "ok": ok, "info": str(info)[:200]})
         print(("ok   " if ok else "FAIL ") + name + ": " + str(info)[:160], flush=True)
@@ -418,10 +460,12 @@ def main(argv=None) -> int:
     total_fill = {"mapping": [], "inserted": 0}
     for owner in borrowed:
         kind, name = owner.split(".", 1)
-        CAT = {"Документ": "Documents", "Справочник": "Catalogs"}
-        shell = src / CAT[kind] / (name + ".xml")
-        f1 = dump1 / CAT[kind] / (name + ".xml")
-        f2 = dump2 / CAT[kind] / (name + ".xml")
+        # ревью M4: карта на ВСЕ виды (было только Документ/Справочник —
+        # KeyError на Обработка и прочих из скоупа этапа 15)
+        d = RU2DIR[kind]
+        shell = src / d / (name + ".xml")
+        f1 = dump1 / d / (name + ".xml")
+        f2 = dump2 / d / (name + ".xml")
         if not (shell.is_file() and f1.is_file() and f2.is_file()):
             continue
         r = fill_shell(shell, f1, f2, a.prefix)
@@ -433,19 +477,24 @@ def main(argv=None) -> int:
     # 4a. формы: замещающие (этап 15) — изменённые формы объектов, существующих в cf1.
     # Общие формы (CommonForms) и новые формы cf2 без оригинала — вне скоупа, в отчёт.
     changed_paths = [e["path"] for e in fd["changed"]]
-    form_rels = {}
-    for path in changed_paths + list(fd["only2"]):
-        m = FORMS_RE.match(path)
-        if m:
-            form_rels[(m.group(1), m.group(2), m.group(3))] = True
+    form_rels, deleted_form_paths = collect_form_targets(
+        changed_paths, list(fd["only2"]), list(fd["only1"]))
     report["forms_skipped"] = sorted(
-        p for p in changed_paths + list(fd["only2"]) if "/Forms/" in p and not FORMS_RE.match(p))
+        p for p in changed_paths + list(fd["only2"]) + list(fd["only1"])
+        if "/Forms/" in p and not FORMS_RE.match(p))
     forms_report = []
     for dir_name, owner, form in sorted(form_rels):
         # П15-4: новая форма cf2 без оригинала в cf1 — вне скоупа (привязки не
         # проверить), в отчёт, конвейер не роняем
         if not (dump1 / dir_name / owner / "Forms" / (form + ".xml")).is_file():
             report.setdefault("new_forms_cf2", []).append(
+                "%s.%s.%s" % (DIR2RU[dir_name], owner, form))
+            continue
+        # ревью C1: файл формы удалён в cf2 целиком — заимствовать не из чего,
+        # в отчёт (частичное удаление — например только модуль — обрабатывается
+        # fill_form: форма приводится к cf2, модуль снимается)
+        if not (dump2 / dir_name / owner / "Forms" / (form + ".xml")).is_file():
+            report.setdefault("deleted_forms_cf2", []).append(
                 "%s.%s.%s" % (DIR2RU[dir_name], owner, form))
             continue
         target = "%s.%s.Form.%s" % (DIR2RU[dir_name], owner, form)
@@ -475,8 +524,9 @@ def main(argv=None) -> int:
         if not owner or ".Форма." in path:
             continue
         kind, name = owner.split(".", 1)
-        CAT = {"Документ": "Document", "Справочник": "Catalog"}
-        mod_path = CAT.get(kind, kind) + "." + name + "." + (
+        # ревью M4: английское имя вида для cfe-patch-method — на всех видах
+        # (было только Документ/Справочник, прочие уходили в -ModulePath кириллицей)
+        mod_path = RU2EN.get(kind, kind) + "." + name + "." + (
             "ObjectModule" if path.endswith("ObjectModule.bsl") else "ManagerModule")
         # список экспортных процедур из исходника cf2 (источник перехватчика)
         src_bsl = dump2 / path if not Path(path).is_absolute() else Path(path)
@@ -514,12 +564,16 @@ def main(argv=None) -> int:
 
     # 6. слот cf1 → загрузка → cfe
     slot = work / "slot-cf1"
-    if not (slot / "1Cv8.1CD").is_file():
+    if not (slot / "1Cv8.1CD").is_file() or not slot_marker.is_file():
+        # нет слота или нет маркера происхождения (проверка cf1 выше) — пересборка
+        # гарантирует, что слот соответствует объявленному cf1
         r = _sh([sys.executable, str(TOOLS / "mockup_init.py"), "--base", str(slot),
                  "--from", a.cf1, "--reset"], timeout=3600)
         if r.returncode != 0:
             step("слот cf1", False, r.stdout[-200:])
             return 1
+        slot_marker.write_text(json.dumps(origin), encoding="utf-8")
+        step("слот cf1", True, "готов (пересоздан)")
     # базовый снимок ДО загрузки расширения: вендор цел = загрузка расширения не
     # изменила основную конфигурацию (сравнение с cf1 напрямую ложно падает —
     # круг «cf -> слот» пересохраняет служебные записи, П15-5: 32 из 45355)
@@ -536,6 +590,7 @@ def main(argv=None) -> int:
     # выгрузка расширения содержит контент cf2 (нормализованное сравнение)
     if form_rels:
         ext_dump = work / "dump-ext"
+        shutil.rmtree(ext_dump, ignore_errors=True)  # ревью C3: stale-файлы прошлых прогонов
         _designer(slot, ["/DumpConfigToFiles", str(ext_dump), "-Extension", a.name],
                   work, "dumpext", timeout=1800)
         for fr in forms_report:
@@ -556,9 +611,10 @@ def main(argv=None) -> int:
                 return 1
         step("постусловие форм", True, "%d шт: контент cf2 в выгрузке расширения"
              % len(forms_report))
-    _designer(slot, ["/DumpCfg", str(work / (a.name + ".cfe")), "-Extension", a.name],
-              work, "dumpcfe")
     cfe = work / (a.name + ".cfe")
+    cfe.unlink(missing_ok=True)  # ревью C3: прошлый cfe не должен сойти за результат
+    _designer(slot, ["/DumpCfg", str(cfe), "-Extension", a.name],
+              work, "dumpcfe")
     step("cfe-артефакт", cfe.is_file() and cfe.stat().st_size > 0, str(cfe))
 
     # 7. верификация: вендор цел

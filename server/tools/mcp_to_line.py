@@ -48,6 +48,22 @@ FATAL_PHRASES = ("Ошибка при ", "не выполнена", "Отказ�
 PLATFORM = Path(r"C:\Program Files\1cv8\8.3.27.2074\bin\1cv8.exe")
 
 
+def designer_verdict(rc: int, res_text: str, log_text: str) -> tuple[bool, str]:
+    """Вердикт одного designer-вызова: код + /DumpResult + фатальные фразы.
+    Ревью M6: отсутствующий/пустой /DumpResult — ОТКАЗ (не успех): молчаливые
+    пропуски пакетных команд известны (несуществующее имя в -Extension)."""
+    if rc != 0:
+        return False, f"код возврата {rc}" + (f"; лог: {log_text[-200:]}" if log_text else "")
+    if res_text.lstrip("﻿") != "0":
+        if not res_text:
+            return False, "/DumpResult отсутствует (файл не создан или пуст)"
+        return False, f"/DumpResult = {res_text}"
+    for phrase in FATAL_PHRASES:
+        if phrase in log_text:
+            return False, f"фатальная фраза в логе: {phrase!r}"
+    return True, "ok"
+
+
 def run_designer(args: list[str], out_log: Path, res_file: Path,
                  timeout: float) -> tuple[bool, str]:
     """Один вызов 1cv8 DESIGNER. Вердикт: код + DumpResult + лог + постусловие —
@@ -69,18 +85,10 @@ def run_designer(args: list[str], out_log: Path, res_file: Path,
         p.kill()
         p.wait()
         return False, f"таймаут {timeout:.0f} с (процесс снят)"
-    if rc != 0:
-        tail = out_log.read_text(encoding="utf-8-sig", errors="replace")[-200:] \
-            if out_log.is_file() else ""
-        return False, f"код возврата {rc}" + (f"; лог: {tail}" if tail else "")
-    res = res_file.read_text(encoding="utf-8-sig").strip() if res_file.is_file() else ""
-    if res and res.lstrip("﻿") != "0":
-        return False, f"/DumpResult = {res}"
+    res = res_file.read_text(encoding="utf-8-sig", errors="replace").strip() \
+        if res_file.is_file() else ""
     log = out_log.read_text(encoding="utf-8-sig", errors="replace") if out_log.is_file() else ""
-    for phrase in FATAL_PHRASES:
-        if phrase in log:
-            return False, f"фатальная фраза в логе: {phrase!r}"
-    return True, "ok"
+    return designer_verdict(rc, res, log)
 
 
 def session_for_base(tk: Toolkit, live_base: Path) -> int:
@@ -133,19 +141,23 @@ def check_args(a: argparse.Namespace) -> None:
 
 def cfe_records_equal(p1: Path, p2: Path) -> tuple[bool, str]:
     """Постусловие доставки cfe (этап 16, схема П14-5): наборы записей и их хеши.
+    Counter пар (имя, хеш) — ревью L10: словарь по имени терял бы дубликаты имён.
     Несуществующее имя в -Extension даёт МОЛЧАЛИВЫЙ пропуск rc=0 — отсекается здесь."""
+    from collections import Counter
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from cf_inspect import CfFile  # noqa: E402
     import hashlib  # noqa: E402
 
-    def inv(p: Path) -> dict:
+    def inv(p: Path) -> Counter:
         with CfFile(str(p)) as cf:
-            return {r["name"]: hashlib.sha1(cf.read(r)).hexdigest() for r in cf.records()}
+            return Counter((r["name"], hashlib.sha1(cf.read(r)).hexdigest())
+                           for r in cf.records())
     a, b = inv(p1), inv(p2)
     if a == b:
-        return True, "записей %d, байт-в-байт" % len(a)
-    diff = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
-    return False, "записей %d/%d, расходятся: %s" % (len(a), len(b), [d[:16] for d in diff[:6]])
+        return True, "записей %d, байт-в-байт" % sum(a.values())
+    diff = sorted(k for k in set(a) | set(b) if a[k] != b[k])
+    return False, "записей %d/%d, расходятся: %s" % (sum(a.values()), sum(b.values()),
+                                                     [d[0][:16] for d in diff[:6]])
 
 
 def cfe_delivery(a: argparse.Namespace, line_base: Path, work: Path) -> int:
