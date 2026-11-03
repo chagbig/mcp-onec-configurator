@@ -28,7 +28,11 @@ var REQ_DIR = SESSION_DIR + "req\\";
 var RESP_DIR = SESSION_DIR + "resp\\";
 var BACKUPS_DIR = "Y:\\Snegopat-mcp\\backups\\";
 var FORMS_DIR = ROOT + "forms\\";
-var BRIDGE_VERSION = "1.0";
+var JOURNAL_DIR = ROOT + "journal\\";
+var MD_KINDS = ["AddChild", "PropChanged", "DeleteChild", "Changed", "Save", "Close", "AfterSave"];
+var journalFile = JOURNAL_DIR + Designer.processId() + ".jsonl";
+var journalCount = 0;
+var BRIDGE_VERSION = "1.1";
 
 // Операции, помечаемые running в сессии (план §4.2: долгие блокируют мост на минуты)
 var LONG_OPS = {
@@ -290,7 +294,8 @@ OPS.send_cfg_cmd = function (a) {
 OPS.session_info = function (a) {
     return { pid: myPid, conn: sessionBase.conn, platform: sessionBase.platform,
         bridge: BRIDGE_VERSION, modalMode: windows.modalMode, running: running,
-        containers: containersInfo(), stat: stat };
+        containers: containersInfo(), stat: stat,
+        journal: { file: journalFile, count: journalCount } };
 };
 
 // Счёт объектов верхнего уровня по всем видам корня.
@@ -908,6 +913,28 @@ function onMdAdd(e) {
         try { rec.id = String(e.obj.id); rec.name = String(e.obj.name); rec.cls = String(e.obj.mdclass.name(1)); } catch (x) {}
         try { rec.parentId = String(e.parentObj.id); } catch (x) {}
         addCapture.events.push(rec);
+    } catch (x) {}
+}
+
+// Журнал MetaDataEvent (этап 18): ВСЕ изменения метаданных — человек и мост.
+// src=agent, пока busy (инвариант 2: идёт обработка запроса моста), иначе human.
+// Файл journal/<pid>.jsonl в UTF-16 (FSO append), постусловие не требуется —
+// журнал диагностический, ошибки записи молча глотаются.
+function onMdJournal(e) {
+    try {
+        var rec = { ts: new Date().getTime(), pid: myPid, src: busy ? "agent" : "human",
+            kind: e.kind, kindName: MD_KINDS[e.kind] || String(e.kind), request: !!e.request };
+        try { rec.obj = { id: String(e.obj.id), name: String(e.obj.name),
+            cls: String(e.obj.mdclass.name(1)) }; } catch (x) {}
+        try { rec.parentId = String(e.parentObj.id); } catch (x) {}
+        try { rec.container = String(e.obj.container.get_identifier()); } catch (x) {
+            try { rec.container = String(e.parentObj.container.get_identifier()); } catch (x2) {}
+        }
+        if (!fso.FolderExists(JOURNAL_DIR)) fso.CreateFolder(JOURNAL_DIR);
+        var f = fso.OpenTextFile(journalFile, 8, true, -1);
+        f.WriteLine(JSON.stringify(rec));
+        f.Close();
+        journalCount++;
     } catch (x) {}
 }
 function listControls(form) {
@@ -1749,6 +1776,11 @@ if (fso.FileExists(ENABLE_FILE)) {
     if (!fso.FolderExists(SESSION_DIR)) fso.CreateFolder(SESSION_DIR);
     if (!fso.FolderExists(REQ_DIR)) fso.CreateFolder(REQ_DIR);
     if (!fso.FolderExists(RESP_DIR)) fso.CreateFolder(RESP_DIR);
+    // журнал MetaDataEvent (этап 18): постоянная подписка — все изменения
+    // метаданных пишутся в journal/<pid>.jsonl (UTF-16, append); src=agent по busy
+    if (!fso.FolderExists(JOURNAL_DIR)) fso.CreateFolder(JOURNAL_DIR);
+    try { events.connect(metadata, "MetaDataEvent", SelfScript.self, "onMdJournal"); }
+    catch (eJ) { writeUtf8Atomic(SESSION_DIR + "journal-error.txt", String(eJ.description || eJ.message || eJ)); }
     writeSession();
     timerId = createTimer(TIMER_MS, SelfScript.self, "onTick");
     }

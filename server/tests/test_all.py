@@ -716,6 +716,55 @@ class TestStage15Forms(unittest.TestCase):
         self.assertIsNone(FORMS_RE.match("Documents/МсрТЧ43/Ext/ObjectModule.bsl"))
 
 
+class TestMdJournal(Base):
+    """Этап 18: чтение журнала MetaDataEvent (JSONL в UTF-16 от моста 1.1+)."""
+
+    def _journal(self, d: Path) -> str:
+        p = d / "journal.jsonl"
+        recs = [
+            {"ts": 1, "pid": 111, "src": "human", "kind": 1, "kindName": "PropChanged",
+             "request": True, "obj": {"id": "a", "name": "Реквизит1", "cls": "Реквизит"}},
+            {"ts": 2, "pid": 111, "src": "agent", "kind": 0, "kindName": "AddChild",
+             "request": False, "obj": {"id": "b", "name": "МсрОбъект", "cls": "Справочник"}},
+            {"ts": 3, "pid": 111, "src": "human", "kind": 4, "kindName": "Save",
+             "request": False, "obj": {"id": "c", "name": "Конфигурация", "cls": "Конфигурация"}},
+        ]
+        import io
+        with io.open(p, "w", encoding="utf-16") as fh:
+            for r in recs:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+            fh.write("{обрыв}\n")  # хвостовая порча не роняет чтение
+        return str(p)
+
+    def test_read_all_and_tail(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            p = self._journal(Path(d))
+            res = self.tk.md_journal(1, path=p)
+            self.assertEqual(res["total"], 3)
+            self.assertEqual(res["entries"][-1]["kindName"], "Save")
+            res2 = self.tk.md_journal(1, path=p, limit=1)
+            self.assertEqual(len(res2["entries"]), 1)
+            self.assertEqual(res2["entries"][0]["ts"], 3)
+
+    def test_filters(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            p = self._journal(Path(d))
+            agent = self.tk.md_journal(1, path=p, src="agent")
+            self.assertEqual(agent["total"], 1)
+            self.assertEqual(agent["entries"][0]["obj"]["name"], "МсрОбъект")
+            saves = self.tk.md_journal(1, path=p, kind=4)
+            self.assertEqual(saves["total"], 1)
+
+    def test_missing_journal(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            res = self.tk.md_journal(1, path=str(Path(d) / "нет.jsonl"))
+            self.assertEqual(res["entries"], [])
+            self.assertIn("журнала нет", res["note"])
+
+
 class TestRefCheck(Base):
     """Этап 17: поиск ссылок перед удалением (скан XML-выгрузки)."""
 

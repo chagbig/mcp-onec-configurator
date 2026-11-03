@@ -25,7 +25,7 @@ mcp-snegopat (Python, mcp>=2.3)          server/mcp_snegopat/
 | Что | Где | Назначение |
 |---|---|---|
 | Мост (аддин JScript) | `bridge/mcp_bridge.js` → `Y:\Snegopat-mcp\x64\modules\snegopat\addins\mcp\` | реестр сессий, диспетчер операций, идемпотентность по id, статусы running, автоответ только знакомым диалогам |
-| MCP-сервер (Python, stdio) | `server/` (пакет `mcp_snegopat`, `pip install -e server`) | 42 инструмента (метаданные, модули, формы XML, расширения, конвейер build_ext), конфиг разрешений, таймауты, журнал вызовов |
+| MCP-сервер (Python, stdio) | `server/` (пакет `mcp_snegopat`, `pip install -e server`) | 44 инструмента (метаданные, модули, формы XML, расширения, конвейер build_ext, журнал правок), конфиг разрешений, таймауты, журнал вызовов |
 | Тесты | `server/tests/` | 27 юнит-тестов на подставном мосте, stdio-смоук, живой e2e-прогон |
 | Документация | `docs/` | план, отчёты этапов |
 

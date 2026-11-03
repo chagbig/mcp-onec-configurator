@@ -846,6 +846,43 @@ class Toolkit:
         res["dump"] = str(d)
         return res
 
+    def md_journal(self, session: int, path: str = "", limit: int = 50,
+                   src: str = "", kind: int | None = None) -> dict:
+        """Журнал MetaDataEvent (этап 18): кто и что менял в метаданных —
+        «human» или «agent» (мост сам помечает свои операции по занятости).
+        Читает journal/<pid>.jsonl (пишет мост 1.1+, UTF-16, append-JSONL:
+        ts, pid, src, kind/kindName (AddChild/PropChanged/DeleteChild/Changed/
+        Save/Close/AfterSave), request, obj {id,name,cls}, parentId, container).
+        limit — последние N записей; src — фильтр «human»/«agent»; kind — фильтр
+        по номеру вида события. path — явный путь к журналу (иначе из session_info)."""
+        import io as _io
+        import json as _json
+        p = path
+        if not p:
+            si = self.session_info(session=session)
+            p = (si.get("journal") or {}).get("file", "")
+        if not p or not Path(p).is_file():
+            return {"entries": [], "file": p,
+                    "note": "журнала нет (мост <1.1 или изменений не было)"}
+        entries = []
+        with _io.open(p, encoding="utf-16", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = _json.loads(line)
+                except _json.JSONDecodeError:
+                    continue  # оборванная хвостовая строка — журнал диагностический
+                if src and e.get("src") != src:
+                    continue
+                if kind is not None and e.get("kind") != kind:
+                    continue
+                entries.append(e)
+        return {"file": p, "total": len(entries), "entries": entries[-limit:],
+                "kinds": {k: sum(1 for e in entries if e.get("kindName") == k)
+                          for k in sorted({e.get("kindName", "?") for e in entries})}}
+
     def ext_save(self, session: int, name: str) -> dict:
         """Сохранить расширение (штатное «Сохранить документ» при активном дереве
         расширения — Frame.FileSave). Проверено живьём (28.10.2026): isModified → False,
@@ -1107,7 +1144,7 @@ _TOOLS = [
     "cfgstore_capture", "cfgstore_commit",
     "form_export", "form_import", "form_get_xml", "form_set_xml",
     "ext_list", "ext_dump_cfe", "ext_save", "ext_create", "ext_open",
-    "ext_build_from_cf", "md_check_refs",
+    "ext_build_from_cf", "md_check_refs", "md_journal",
     "tree_activate", "tree_activate_group", "dialog_probe",
     "bridge_wait", "bridge_stats", "focus_probe",
 ]
