@@ -977,6 +977,16 @@ class TestMcpToLineCfe(unittest.TestCase):
         with self.assertRaises(SystemExit):
             check_args(self._ns(cfe="", ext_name="", live_base="B", objects=""))
 
+    def test_vendor_mismatch_diagnosis(self) -> None:
+        """Пилот 04.11.2026: rc=101 «Не найден объект» — вендор приёмника чужой."""
+        from mcp_to_line import diagnose_delivery_fail
+        log = ("МсрДифБой: Не найден объект ОбщаяКартинка.Набор\r\n"
+               "МсрДифБой: Не найден объект Документ.АктВыполненныхРабот")
+        msg = diagnose_delivery_fail(log)
+        self.assertIn("вендор базы линии не совпадает", msg)
+        self.assertIn("Документ.АктВыполненныхРабот", msg)
+        self.assertEqual(diagnose_delivery_fail("обычная ошибка"), "")
+
 
 class TestServerBuild(unittest.TestCase):
     def test_all_tools_registered(self) -> None:

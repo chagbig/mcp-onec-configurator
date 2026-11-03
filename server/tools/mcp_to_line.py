@@ -160,6 +160,21 @@ def cfe_records_equal(p1: Path, p2: Path) -> tuple[bool, str]:
                                                      [d[0][:16] for d in diff[:6]])
 
 
+VENDOR_MISMATCH_MARK = "Не найден объект"
+
+
+def diagnose_delivery_fail(log_text: str) -> str:
+    """Пилот 04.11.2026: LoadCfg расширения проходит и на чужом вендоре, а
+    UpdateDBCfg -Extension падает rc=101 «Не найден объект <Вид>.Имя» — приёмник
+    не содержит объекты вендора, на которых собрано расширение."""
+    if VENDOR_MISMATCH_MARK in log_text:
+        missing = sorted(set(re.findall(VENDOR_MISMATCH_MARK + r"\s+(\S+)", log_text)))[:5]
+        return ("вендор базы линии не совпадает с вендором cf1: расширение ссылается "
+                "на отсутствующие объекты (%s) — база линии должна быть собрана "
+                "из того же вендорского cf" % ", ".join(missing))
+    return ""
+
+
 def cfe_delivery(a: argparse.Namespace, line_base: Path, work: Path) -> int:
     """Режим 2 (этап 16): готовый cfe → база линии. Последовательные вызовы
     (НЕ склейкой); постусловие — записи cfe == записи снятой копии расширения
@@ -187,6 +202,11 @@ def cfe_delivery(a: argparse.Namespace, line_base: Path, work: Path) -> int:
         ok, info = run_designer(["/F", str(line_base)] + args,
                                 work / f"{name}-{stamp}.log", work / f"{name}-{stamp}.res",
                                 a.timeout)
+        if not ok:
+            log_path = work / f"{name}-{stamp}.log"
+            if log_path.is_file():
+                info += ("; " + diagnose_delivery_fail(
+                    log_path.read_text(encoding="utf-8-sig", errors="replace")))
         if not step(f"база линии: {name}", ok, info):
             return finish(results, work, stamp)
         if name == "CheckModulesExt":
