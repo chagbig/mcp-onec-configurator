@@ -782,6 +782,70 @@ class Toolkit:
                 "warning": report.get("warning"),
                 "manual": report.get("manual"), "report": str(report_file)}
 
+    def md_check_refs(self, object_name: str, dump_dir: str = "",
+                      session: int | None = None, work: str = "",
+                      timeout_s: int = 3600, max_context: int = 5) -> dict:
+        """Поиск ссылок на объект ПЕРЕД удалением (этап 17): скан литералов типов
+        (cfg:CatalogRef.X и производные) по полной XML-выгрузке; собственное
+        поддерево объекта исключается по путям. Если dump_dir не указан — свежая
+        выгрузка снимается: cfg_archive_cf (нужна живая сессия) -> temp-база ->
+        /DumpConfigToFiles; на 2 ГБ это ~25 мин (timeout_s >= 1800). НЕ сканируются
+        (свой формат): права ролей, подписки; тексты запросов в модулях.
+        work — каталог выгрузки (переиспользуется между вызовами)."""
+        import re as _re
+        import shutil as _sh
+        import subprocess as _sp
+        import sys as _sys
+        from pathlib import Path as _P
+        sys_tools = _P(__file__).resolve().parents[1] / "tools"
+        if not _re.fullmatch(r"[А-ЯЁA-Z][А-ЯЁа-яёA-Za-z0-9_]*\.[\wА-ЯЁа-яё]+", object_name):
+            raise BridgeError("bad_args", "object_name: «Вид.Имя»")
+        kind = object_name.split(".", 1)[0]
+        _sys.path.insert(0, str(sys_tools))
+        from ref_check import KIND_TYPES, scan_dump
+        if kind not in KIND_TYPES:
+            raise BridgeError("bad_args", f"неизвестный вид: {kind}")
+        d = _P(dump_dir) if dump_dir else _P("")
+        if not d or not d.is_dir():
+            # снимаем свежую выгрузку: cf живой базы -> temp-база -> полный дамп
+            if session is None:
+                raise BridgeError("bad_args",
+                                  "укажите dump_dir со свежей выгрузкой или session "
+                                  "(живой конфигуратор) для снятия новой")
+            base = str(_session_base_path(self.bridge, session))
+            w = _P(work) if work else _P(r"Y:\Snegopat-mcp\verify\ref-check") / \
+                _re.sub(r"[^\w]", "_", object_name)
+            w.mkdir(parents=True, exist_ok=True)
+            arch = self.cfg_archive_cf(session=session)
+            cf = _P(arch["file"])
+            temp_base = w / "temp-base"
+            _sh.rmtree(temp_base, ignore_errors=True)
+            r = _sp.run([_sys.executable, str(sys_tools / "mockup_init.py"),
+                         "--base", str(temp_base), "--from", str(cf), "--reset"],
+                        capture_output=True, text=True, timeout=timeout_s)
+            if r.returncode != 0:
+                raise BridgeError("ref_check_failed",
+                                  f"temp-база: {r.stdout[-200:]}{r.stderr[-200:]}")
+            dump = w / "dump"
+            _sh.rmtree(dump, ignore_errors=True)
+            plat = r"C:\Program Files\1cv8\8.3.27.2074\bin\1cv8.exe"
+            res = w / "dump.res"
+            r = _sp.run([plat, "DESIGNER", "/DisableStartupDialogs", "/F", str(temp_base),
+                         "/DumpConfigToFiles", str(dump), "/Out", str(w / "dump.log"),
+                         "/DumpResult", str(res)], capture_output=True, timeout=timeout_s)
+            rt = res.read_text(encoding="utf-8-sig", errors="replace").strip() \
+                if res.is_file() else "?"
+            if r.returncode != 0 or rt not in ("0", ""):
+                raise BridgeError("ref_check_failed",
+                                  f"выгрузка: rc={r.returncode}, res={rt}")
+            _sh.rmtree(temp_base, ignore_errors=True)  # база больше не нужна, дамп остаётся
+            d = dump
+        res = scan_dump(d, object_name, max_context)
+        if not res.get("ok"):
+            raise BridgeError("ref_check_failed", res.get("err", "?"))
+        res["dump"] = str(d)
+        return res
+
     def ext_save(self, session: int, name: str) -> dict:
         """Сохранить расширение (штатное «Сохранить документ» при активном дереве
         расширения — Frame.FileSave). Проверено живьём (28.10.2026): isModified → False,
@@ -1043,7 +1107,7 @@ _TOOLS = [
     "cfgstore_capture", "cfgstore_commit",
     "form_export", "form_import", "form_get_xml", "form_set_xml",
     "ext_list", "ext_dump_cfe", "ext_save", "ext_create", "ext_open",
-    "ext_build_from_cf",
+    "ext_build_from_cf", "md_check_refs",
     "tree_activate", "tree_activate_group", "dialog_probe",
     "bridge_wait", "bridge_stats", "focus_probe",
 ]

@@ -716,6 +716,77 @@ class TestStage15Forms(unittest.TestCase):
         self.assertIsNone(FORMS_RE.match("Documents/МсрТЧ43/Ext/ObjectModule.bsl"))
 
 
+class TestRefCheck(Base):
+    """Этап 17: поиск ссылок перед удалением (скан XML-выгрузки)."""
+
+    def _dump(self, d: Path) -> Path:
+        dump = d / "dump"
+        (dump / "Documents" / "МсрТЧ43" / "Forms" / "ФормаДокумента" / "Ext").mkdir(parents=True)
+        (dump / "Documents" / "МсрТЧ43.xml").write_text(
+            '<MetaDataObject><Document uuid="1"><Properties><Name>МсрТЧ43</Name>'
+            '</Properties></Document></MetaDataObject>', encoding="utf-8-sig")
+        # собственная форма: ссылка на хозяина — должна быть исключена по пути
+        (dump / "Documents" / "МсрТЧ43" / "Forms" / "ФормаДокумента" / "Ext" / "Form.xml").write_text(
+            '<Form><Attributes><Attribute name="Объект" id="1"><Type>'
+            '<v8:Type>cfg:DocumentObject.МсрТЧ43</v8:Type></Type></Attribute>'
+            '</Attributes></Form>', encoding="utf-8-sig")
+        # чужой объект со ссылкой — должен быть найден
+        (dump / "Documents" / "Другой.xml").write_text(
+            '<MetaDataObject><Document uuid="2"><Properties><Name>Другой</Name></Properties>'
+            '<ChildObjects><Attribute uuid="9"><Properties><Name>Рек</Name>'
+            '<Type><v8:Type>cfg:DocumentRef.МсрТЧ43</v8:Type></Type></Properties>'
+            '</Attribute></ChildObjects></Document></MetaDataObject>', encoding="utf-8-sig")
+        # чужая форма со ссылкой через MainTable
+        (dump / "Documents" / "Другой" / "Forms" / "ФормаСписка" / "Ext").mkdir(parents=True)
+        (dump / "Documents" / "Другой" / "Forms" / "ФормаСписка" / "Ext" / "Form.xml").write_text(
+            '<Form><Attributes><Attribute name="Список" id="1"><Settings xsi:type="DynamicList">'
+            '<MainTable>Document.МсрТЧ43</MainTable></Settings></Attribute></Attributes></Form>',
+            encoding="utf-8-sig")
+        return dump
+
+    def test_refs_found_outside_own_subtree(self) -> None:
+        import tempfile
+        from ref_check import scan_dump
+        with tempfile.TemporaryDirectory() as d:
+            res = scan_dump(self._dump(Path(d)), "Документ.МсрТЧ43")
+            self.assertTrue(res["ok"])
+            self.assertTrue(res["refs_found"])
+            files = {h["file"] for h in res["hits"]}
+            self.assertIn("Documents/Другой.xml", files)
+            self.assertIn("Documents/Другой/Forms/ФормаСписка/Ext/Form.xml", files)
+            # собственное поддерево исключено
+            self.assertFalse(any(f.startswith("Documents/МсрТЧ43") for f in files))
+
+    def test_no_refs(self) -> None:
+        import tempfile
+        from ref_check import scan_dump
+        with tempfile.TemporaryDirectory() as d:
+            dump = self._dump(Path(d))
+            (dump / "Documents" / "Другой.xml").unlink()
+            (dump / "Documents" / "Другой" / "Forms" / "ФормаСписка" / "Ext" / "Form.xml").unlink()
+            res = scan_dump(dump, "Документ.МсрТЧ43")
+            self.assertTrue(res["ok"])
+            self.assertFalse(res["refs_found"])
+
+    def test_unknown_kind_rejected(self) -> None:
+        import tempfile
+        from ref_check import scan_dump
+        with tempfile.TemporaryDirectory() as d:
+            res = scan_dump(Path(d), "ЧтоТоСтранное.Имя")
+            self.assertFalse(res["ok"])
+
+    def test_md_check_refs_via_dump_dir(self) -> None:
+        import tempfile
+        from mcp_snegopat.bridge import BridgeError
+        with tempfile.TemporaryDirectory() as d:
+            dump = self._dump(Path(d))
+            res = self.tk.md_check_refs("Документ.МсрТЧ43", dump_dir=str(dump))
+            self.assertTrue(res["refs_found"])
+            self.assertEqual(res["dump"], str(dump))
+            with self.assertRaises(BridgeError):
+                self.tk.md_check_refs("СтранныйВид.Имя", dump_dir=str(dump))
+
+
 class TestExtBuildFromCf(Base):
     """Этап 16: MCP-инструмент ext_build_from_cf — валидация аргументов."""
 
