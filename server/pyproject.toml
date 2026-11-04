@@ -1,6 +1,6 @@
 [project]
 name = "mcp-snegopat"
-version = "1.0.0"
+version = "1.1.0"
 description = "MCP-сервер живого конфигуратора 1С через Снегопат (проект mcp-configurator)"
 requires-python = ">=3.11"
 dependencies = ["mcp>=2.3"]
