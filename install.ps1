@@ -1,4 +1,4 @@
-# install.ps1 — установщик поставки mcp-configurator v1.1.0
+﻿# install.ps1 — установщик поставки mcp-configurator v1.1.0
 # Целевая раскладка жёсткая: мост пишет в <Drive>:\Snegopat-mcp\mcp (константы моста).
 # Запуск из корня распакованной поставки:
 #   powershell.exe -NoProfile -ExecutionPolicy Bypass -File install.ps1 [-Drive Y]
