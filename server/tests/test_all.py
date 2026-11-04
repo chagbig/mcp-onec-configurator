@@ -765,6 +765,85 @@ class TestMdJournal(Base):
             self.assertIn("журнала нет", res["note"])
 
 
+class TestCreateOwnObject(unittest.TestCase):
+    """Этап 19: новый объект cf2 -> собственный объект расширения."""
+
+    WRAPPER = ('<?xml version="1.0" encoding="UTF-8"?>'
+               '<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" '
+               'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
+               '<CommonForm uuid="{uuid}"><Properties>'
+               '<Name>{name}</Name><Synonym/><FormType>Managed</FormType>'
+               '</Properties></CommonForm></MetaDataObject>')
+
+    def _dump2(self, d: Path) -> Path:
+        dump2 = d / "dump2"
+        (dump2 / "CommonForms" / "МсрПриёмка" / "Ext").mkdir(parents=True)
+        (dump2 / "CommonForms" / "МсрПриёмка.xml").write_text(
+            self.WRAPPER.format(uuid="7c63b0cb-1ad3-4aa8-bd9e-6c7ff81c9a06",
+                                name="МсрПриёмка"), encoding="utf-8-sig")
+        (dump2 / "CommonForms" / "МсрПриёмка" / "Ext" / "Form.xml").write_text(
+            '<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">'
+            '<Attributes><Attribute name="Список" id="1"><Settings xsi:type="DynamicList">'
+            '<MainTable>Document.МсрТЧ43</MainTable></Settings></Attribute></Attributes></Form>',
+            encoding="utf-8-sig")
+        return dump2
+
+    def test_own_object_created(self) -> None:
+        import tempfile
+        from build_ext import create_own_object
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            dump2 = self._dump2(d)
+            src = d / "src"
+            r = create_own_object(src, dump2, "CommonForms", "CommonForm",
+                                  "МсрПриёмка", "МсрП_МсрПриёмка")
+            self.assertTrue(r["ok"])
+            w = (src / "CommonForms" / "МсрП_МсрПриёмка.xml").read_text(encoding="utf-8-sig")
+            self.assertIn("<Name>МсрП_МсрПриёмка</Name>", w)      # имя с префиксом
+            self.assertNotIn("<Name>МсрПриёмка</Name>", w)        # старое имя заменено
+            self.assertNotIn("7c63b0cb", w)              # uuid НОВЫЙ (own = другой объект)
+            self.assertNotIn("ObjectBelonging", w)       # own, не Adopted
+            f = (src / "CommonForms" / "МсрП_МсрПриёмка" / "Ext" / "Form.xml") \
+                .read_text(encoding="utf-8-sig")
+            self.assertIn("Document.МсрТЧ43", f)         # чужие ссылки не тронуты
+
+    def test_rename_own_refs(self) -> None:
+        from build_ext import _rename_refs
+        # квалифицированные ссылки на САМ объект переименовываются
+        self.assertEqual(
+            _rename_refs("Document.МсрПриёмка cfg:DocumentRef.МсрПриёмка",
+                         "Document", "МсрПриёмка", "МсрП_МсрПриёмка"),
+            "Document.МсрП_МсрПриёмка cfg:DocumentRef.МсрП_МсрПриёмка")
+        # чужие объекты с похожими именами не тронуты
+        self.assertEqual(
+            _rename_refs("Document.МсрПриёмка2 Document.Приёмка Catalog.МсрПриёмка",
+                         "Document", "МсрПриёмка", "МсрП_МсрПриёмка"),
+            "Document.МсрПриёмка2 Document.Приёмка Catalog.МсрПриёмка")
+
+    def test_idempotent_uuid(self) -> None:
+        import tempfile
+        from build_ext import create_own_object
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            dump2 = self._dump2(d)
+            src = d / "src"
+            create_own_object(src, dump2, "CommonForms", "CommonForm",
+                              "МсрПриёмка", "МсрП_МсрПриёмка")
+            u1 = (src / "CommonForms" / "МсрП_МсрПриёмка.xml") \
+                .read_text(encoding="utf-8-sig")
+            create_own_object(src, dump2, "CommonForms", "CommonForm",
+                              "МсрПриёмка", "МсрП_МсрПриёмка")
+            u2 = (src / "CommonForms" / "МсрП_МсрПриёмка.xml") \
+                .read_text(encoding="utf-8-sig")
+            self.assertEqual(u1, u2)  # контент тот же — uuid стабилен
+
+    def test_registration_in_configuration(self) -> None:
+        import tempfile
+        from build_ext import NEW_OWN_KINDS
+        self.assertIn("ОбщаяФорма", NEW_OWN_KINDS)
+        self.assertEqual(NEW_OWN_KINDS["ОбщаяФорма"], ("CommonForms", "CommonForm"))
+
+
 class TestRefCheck(Base):
     """Этап 17: поиск ссылок перед удалением (скан XML-выгрузки)."""
 

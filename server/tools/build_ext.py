@@ -342,6 +342,74 @@ def fill_form(src: Path, dump1: Path, dump2: Path, dir_name: str, owner: str,
     return out
 
 
+# этап 19: новые объекты cf2 -> собственные объекты расширения.
+# (каталог выгрузки, тег записи в Configuration.xml)
+NEW_OWN_KINDS = {"ОбщаяФорма": ("CommonForms", "CommonForm"),
+                 "Документ": ("Documents", "Document"),
+                 "Справочник": ("Catalogs", "Catalog")}
+
+
+_RENAME_SUFFIXES = {
+    "CommonForm": ("",), "Document": ("", "Ref", "Object", "Selection", "List", "Manager"),
+    "Catalog": ("", "Ref", "Object", "Selection", "List", "Manager"),
+}
+
+
+def _rename_refs(text: str, kind_en: str, name: str, ext_name: str) -> str:
+    """Квалифицированные ссылки на сам объект: Document.МсрПриёмка ->
+    Document.МсрП_МсрПриёмка, включая производные типы (cfg:DocumentRef.X).
+    Ссылки на ДРУГИЕ объекты не трогаются."""
+    suffixes = _RENAME_SUFFIXES.get(kind_en, ("",))
+    alts = "|".join(re.escape(kind_en + s) for s in suffixes)
+    return re.sub(rf"\b({alts})\.{re.escape(name)}\b", rf"\1.{ext_name}", text)
+
+
+def create_own_object(src: Path, dump2: Path, dir_name: str, kind_en: str,
+                      name: str, ext_name: str) -> dict:
+    """Этап 19: собственный объект расширения из нового объекта cf2.
+    Wrapper (новый uuid, имя с префиксом) + поддерево (формы/макеты/модули)
+    с заменой квалифицированных ссылок на сам объект. Own = БЕЗ
+    ObjectBelonging=Adopted / ExtendedConfigurationObject. Идемпотентно:
+    контент без изменений -> uuid сохраняется."""
+    src_dir = src / dir_name
+    src_dir.mkdir(parents=True, exist_ok=True)
+    src_xml = src_dir / (ext_name + ".xml")
+    cf2_xml = dump2 / dir_name / (name + ".xml")
+    if not cf2_xml.is_file():
+        return {"ok": False, "err": "в cf2 нет wrapper: %s" % cf2_xml}
+    x = cf2_xml.read_text(encoding="utf-8-sig")
+    x = _rename_refs(x, kind_en, name, ext_name)
+    x = x.replace("<Name>%s</Name>" % name, "<Name>%s</Name>" % ext_name, 1)
+    if src_xml.is_file():
+        old = re.sub(r'uuid="[0-9a-f-]{36}"', 'uuid="X"', src_xml.read_text(encoding="utf-8-sig"))
+        new = re.sub(r'uuid="[0-9a-f-]{36}"', 'uuid="X"', x)
+        if old != new:  # контент изменился — перегенерация с новым uuid
+            src_xml.write_text(re.sub(r'uuid="[0-9a-f-]{36}"',
+                                      lambda m: 'uuid="%s"' % str(_uuid.uuid4()), x, count=1),
+                               encoding="utf-8-sig")
+        # иначе контент тот же — uuid стабилен
+    else:
+        src_xml.write_text(re.sub(r'uuid="[0-9a-f-]{36}"',
+                                  lambda m: 'uuid="%s"' % str(_uuid.uuid4()), x, count=1),
+                           encoding="utf-8-sig")
+    src_sub = src_dir / ext_name
+    cf2_sub = dump2 / dir_name / name
+    if cf2_sub.is_dir():
+        if src_sub.exists():
+            shutil.rmtree(src_sub)
+        shutil.copytree(cf2_sub, src_sub)
+        for p in src_sub.rglob("*"):
+            if not p.is_file():
+                continue
+            t = p.read_text(encoding="utf-8-sig", errors="replace")
+            t2 = _rename_refs(t, kind_en, name, ext_name)
+            # uuid обёрток форм сохраняются как в cf2 (объект новый — конфликтов нет,
+            # copytree воспроизводит те же байты — идемпотентность)
+            if t2 != t:
+                p.write_text(t2, encoding="utf-8-sig")
+    return {"ok": True}
+
+
 def main(argv=None) -> int:
     import argparse
     ap = argparse.ArgumentParser(description="build_ext: расширение из пары cf (этап 14)")
@@ -414,9 +482,14 @@ def main(argv=None) -> int:
          if owner_of(f) and (f.endswith(".bsl") or f.endswith("Form.xml")) and _in_cf1(f)})
     report["new_objects_cf2"] = sorted({owner_of(f) for f in fd["only2"] if owner_of(f)
                                         and owner_of(f) not in changed_owners})
-    step("владельцы изменённого", bool(changed_owners) or not fd["changed"],
-         "%d шт: %s" % (len(changed_owners), changed_owners[:5]))
-    if not changed_owners and fd["changed"]:
+    # этап 19: собственные объекты из новых cf2 оправдывают конвейер и без
+    # изменённых владельцев (пилот: вендорская дельта = целиком новый объект)
+    new_ownable = [o for o in report["new_objects_cf2"] if o.split(".", 1)[0] in NEW_OWN_KINDS]
+    step("владельцы изменённого",
+         bool(changed_owners) or not fd["changed"] or bool(new_ownable),
+         "%d шт: %s; новых объектов: %d" % (len(changed_owners), changed_owners[:5],
+                                            len(new_ownable)))
+    if not changed_owners and fd["changed"] and not new_ownable:
         step("владельцы изменённого", False,
              "отличия не отображаются на объекты верхнего уровня — пустое расширение")
         report["transfer"] = fd
@@ -513,6 +586,33 @@ def main(argv=None) -> int:
         step("форма " + target, True, "uuid %s → %s" % (fr["cf1_uuid"][:8], fr["ext_uuid"][:8]))
     report["forms"] = forms_report
 
+    # 4c. новые объекты cf2 -> собственные объекты расширения (этап 19; показано
+    # пилотом: вендорская дельта может состоять целиком из новых объектов)
+    new_own = []
+    for owner in report.get("new_objects_cf2", []):
+        kind_ru, name = owner.split(".", 1)
+        mk = NEW_OWN_KINDS.get(kind_ru)
+        if not mk:
+            report.setdefault("new_objects_skipped", []).append(owner)
+            continue
+        dir_name, kind_en = mk
+        ext_name = name if name.startswith(a.prefix) else a.prefix + name
+        r19 = create_own_object(src, dump2, dir_name, kind_en, name, ext_name)
+        if not r19["ok"]:
+            step("новый объект " + owner, False, r19["err"])
+            return 1
+        # регистрация в Configuration.xml (платформа сортирует при загрузке)
+        cfg_xml = src / "Configuration.xml"
+        t = cfg_xml.read_text(encoding="utf-8-sig")
+        entry = "<%s>%s</%s>" % (kind_en, ext_name, kind_en)
+        if entry not in t:
+            t = t.replace("\t\t</ChildObjects>",
+                          "\t\t\t%s\n\t\t</ChildObjects>" % entry, 1)
+            cfg_xml.write_text(t, encoding="utf-8-sig")
+        new_own.append({"cf2": owner, "ext": "%s.%s" % (kind_ru, ext_name)})
+        step("новый объект " + owner, True, "own: %s.%s" % (kind_en, ext_name))
+    report["new_objects"] = new_own
+
     # 4b. перехватчики изменённых модулей (ИзменениеИКонтроль; источник — cf2,
     #     ловушка ГисМарк: собственный метод = имя оригинала висит клиент)
     for path in changed_paths + list(fd["only2"]):
@@ -586,13 +686,29 @@ def main(argv=None) -> int:
         step("CheckModules", False, log[-200:])
         return 1
     _designer(slot, ["/UpdateDBCfg", "-Extension", a.name], work, "upd", timeout=900)
-    # 6b. постусловие форм (этап 15): платформа приняла замещающие формы —
-    # выгрузка расширения содержит контент cf2 (нормализованное сравнение)
-    if form_rels:
+    # 6b. постусловие форм (этап 15) и новых объектов (этап 19): платформа
+    # приняла замещающие формы и own-объекты — выгрузка расширения содержит их
+    if form_rels or new_own:
         ext_dump = work / "dump-ext"
         shutil.rmtree(ext_dump, ignore_errors=True)  # ревью C3: stale-файлы прошлых прогонов
         _designer(slot, ["/DumpConfigToFiles", str(ext_dump), "-Extension", a.name],
                   work, "dumpext", timeout=1800)
+        for no in new_own:
+            kind_ru, ext_name = no["ext"].split(".", 1)
+            dir_name, kind_en = NEW_OWN_KINDS[kind_ru]
+            f = ext_dump / dir_name / (ext_name + ".xml")
+            ok19 = f.is_file() and ext_name in f.read_text(encoding="utf-8-sig",
+                                                           errors="replace")
+            if ok19:  # own = без Adopted
+                ok19 = "ObjectBelonging" not in f.read_text(encoding="utf-8-sig",
+                                                            errors="replace")
+            if not ok19:
+                step("постусловие нового объекта " + no["ext"], False,
+                     "нет в выгрузке расширения или помечен Adopted")
+                return 1
+        if new_own:
+            step("постусловие новых объектов", True, "%d шт: own-объекты в выгрузке"
+                 % len(new_own))
         for fr in forms_report:
             base = Path(fr["dir"]) / fr["owner"] / "Forms" / fr["form"]
             ext_xml = ext_dump / base / "Ext" / "Form.xml"
