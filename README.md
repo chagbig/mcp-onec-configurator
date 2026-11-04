@@ -71,8 +71,10 @@ MCP-инструмент `ext_build_from_cf` (этап 16) — тот же ко�
 1. Снегопат: сборка в `Y:\Snegopat-mcp\x64` (это машина владельца; путь без кириллицы).
    `starter.exe` запущен; `std/main.js` грузит минимальный комплект + `addins\mcp\mcp_bridge.js`.
 2. Файл включения `Y:\Snegopat-mcp\mcp\mcp_bridge.on` (без него мост не ставит таймер — инвариант 8).
-3. Сервер: `pip install -e server` (Python ≥3.11, ставит `mcp`); команда `mcp-snegopat`.
-4. Конфиг (необязателен, безопасные умолчания) — JSON-файл, путь в `MCP_SNEGOPAT_CONFIG`
+3. DynamicWrapperX 2.2.0.0 — per-user регистрация (`regsvr32 /i Y:\Snegopat-mcp\bin\dynwrapx.dll`,
+   x64; x86-вариант рядом — `dynwrapx32.dll`); нужен мышиному контуру (фокус/клики).
+4. Сервер: `pip install -e server` (Python ≥3.11, ставит `mcp`); команда `mcp-snegopat`.
+5. Конфиг (необязателен, безопасные умолчания) — JSON-файл, путь в `MCP_SNEGOPAT_CONFIG`
    или `%LOCALAPPDATA%\mcp-snegopat\config.json` (пример — `server/mcp_snegopat.json.example`):
 
 ```json
