@@ -866,6 +866,48 @@ class TestMakeSnegopatSet(unittest.TestCase):
                             r'\\n\{"B",0\},0\}', v)
             self.assertIsNotNone(our)
 
+# -*- coding: utf-8 -*-
+"""Юнит-тесты cf_recdiff на РЕАЛЬНОЙ малой паре (fixtures cf — не синтетика)."""
+import unittest
+from pathlib import Path
+
+SMALL_CF1 = Path(r"Y:/Snegopat-mcp/verify/p15/Мср15-cf1.cf")
+SMALL_CF2 = Path(r"Y:/Snegopat-mcp/verify/p15/Мср15-cf2.cf")
+HAS_PAIR = SMALL_CF1.is_file() and SMALL_CF2.is_file()
+
+
+@unittest.skipUnless(HAS_PAIR, "малая пара cf недоступна на этой машине")
+class TestCfRecDiff(unittest.TestCase):
+    """v1.3: записный сканер — триаж двух cf за секунды."""
+
+    def test_small_pair_one_changed_record(self) -> None:
+        from cf_recdiff import scan
+        res = scan(str(SMALL_CF1), str(SMALL_CF2))
+        self.assertTrue(res["ok"] if "ok" in res else True)
+        self.assertEqual(len(res["new"]), 0)
+        self.assertEqual(len(res["deleted"]), 0)
+        self.assertEqual(len(res["changed"]), 1)  # сериализация ФормаДокумента
+
+    def test_identical_zero_candidates(self) -> None:
+        from cf_recdiff import scan
+        res = scan(str(SMALL_CF1), str(SMALL_CF1))
+        self.assertEqual(res["new"], [])
+        self.assertEqual(res["deleted"], [])
+        self.assertEqual(res["changed"], [])
+
+    def test_service_records_excluded(self) -> None:
+        from cf_recdiff import scan
+        res = scan(str(SMALL_CF1), str(SMALL_CF2))
+        for n in res["new"] + res["deleted"] + res["changed"]:
+            self.assertNotIn(n, ("root", "version", "versions", "configinfo", "deleted"))
+
+    def test_named_extracts_form_name(self) -> None:
+        from cf_recdiff import scan
+        res = scan(str(SMALL_CF1), str(SMALL_CF2))
+        names = [nm["name"] for nm in res["named"] if nm["name"]]
+        self.assertTrue(any("ФормаДокумента" in n for n in names), names)
+
+
 class TestDoctor(Base):
     """v1.2.1: doctor — самодиагностика (файловый чек-лист на подставном доме)."""
 
