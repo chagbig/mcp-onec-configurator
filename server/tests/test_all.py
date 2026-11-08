@@ -76,6 +76,27 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(cfg.own_bases, ['File="C:\\b";'])
             self.assertEqual(cfg.root, Path(d))
 
+    def test_int_keys_from_example(self) -> None:
+        """Баг-репорт чистой машины (v1.2.1): int-ключи example (journal_keep=3)
+        падали в _apply — int-ветки не было, сервер не стартовал."""
+        from mcp_snegopat.config import load_config
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "cfg.json"
+            p.write_text(json.dumps({
+                "root": str(Path(d)),
+                "journal_keep": 3,
+                "journal_max_mb": 20.0,
+                "default_timeout_s": 120,
+                "long_timeout_s": 900,
+                "heartbeat_stale_s": 30,
+            }), encoding="utf-8")
+            cfg = load_config(p)
+            self.assertEqual(cfg.journal_keep, 3)
+            self.assertEqual(cfg.journal_max_mb, 20.0)
+            self.assertEqual(cfg.default_timeout_s, 120.0)
+            self.assertEqual(cfg.long_timeout_s, 900.0)
+            self.assertEqual(cfg.heartbeat_stale_s, 30.0)
+
     def test_unknown_key_rejected(self) -> None:
         from mcp_snegopat.config import load_config
         with tempfile.TemporaryDirectory() as d:

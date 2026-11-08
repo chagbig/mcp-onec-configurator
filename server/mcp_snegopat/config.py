@@ -104,5 +104,8 @@ def _apply(cfg: Config, data: dict) -> None:
             setattr(cfg, key, value)
         elif isinstance(cur, float):
             setattr(cfg, key, float(value))
+        elif isinstance(cur, int) and not isinstance(cur, bool):
+            # int-поля (journal_keep); bool — подтип int, отсечён веткой выше
+            setattr(cfg, key, int(value))
         else:
             raise ValueError(f"неподдерживаемый тип ключа {key}")

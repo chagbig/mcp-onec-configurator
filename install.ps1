@@ -163,7 +163,7 @@ robocopy $ProjSrc $ProjDst /E /NFL /NDL /NJH /NJS /XD __pycache__ .git | Out-Nul
 if ($LASTEXITCODE -ge 8) { Fail "robocopy проекта: код $LASTEXITCODE" }
 if (-not $SkipPip) {
     Step "pip install -e server"
-    Push-Location (Join-Path $ProjDst)
+    Push-Location $ProjDst
     & python -m pip install -e server
     if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "pip install -e server: код $LASTEXITCODE (нужен доступ к PyPI для mcp)" }
     Pop-Location
