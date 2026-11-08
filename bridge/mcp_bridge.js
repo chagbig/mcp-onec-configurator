@@ -219,14 +219,37 @@ function container(idx) {
     return c;
 }
 
+// Текст исключения с фоллбеком: на 3.0.66 у COM-ошибок description/message
+// бывают пустыми — без фоллбека наружу уходит голое "Error" (пробел 1 отчёта 08.11).
+function errStr(e) {
+    try { return String(e.description || e.message || e); } catch (e2) { return "Error"; }
+}
+
 // Поиск подчинённого без учёта регистра перебором индексов
 // (childObject(вид, имя) сравнивает с учётом регистра — находка ревью ред. 1).
+// childObjectsCount(строка) на 3.0.66 бросает у не-корневых объектов (пробелы 1/4
+// отчёта 08.11: resolve по пути ломался на КАЖДОМ составном пути) — счётчик
+// берём числовым индексом через childKindIndex; отсутствие вида = "не найден".
 function childByName(obj, kind, name) {
-    var n = obj.childObjectsCount(kind);
+    var idx = childKindIndex(obj, kind);
+    if (idx === null) return null;
+    var n = obj.childObjectsCount(idx);
     var lname = String(name).toLowerCase();
     for (var i = 0; i < n; i++) {
-        var ch = obj.childObject(kind, i);
+        var ch = null;
+        try { ch = obj.childObject(kind, i); } catch (e) { continue; }
         if (ch && String(ch.name).toLowerCase() == lname) return ch;
+    }
+    return null;
+}
+
+// Индекс дочернего вида по рус. имени («Реквизиты») — как в md_tree, только числовые
+// вызовы childObjectsCount/childObject. null, если вида нет (не ошибка!).
+function childKindIndex(obj, kind) {
+    var mdc = obj.mdclass, want = String(kind).toLowerCase();
+    for (var i = 0; i < mdc.childsClassesCount; i++) {
+        try { if (String(mdc.childClassAt(i).name(1, true)).toLowerCase() == want) return i; }
+        catch (e) {}
     }
     return null;
 }
@@ -252,7 +275,7 @@ function resolve(args) {
 }
 
 function objInfo(obj) {
-    return { name: String(obj.name), id: String(obj.id), cls: String(obj.mdclass.name(1)) };
+    return { name: safeStr(obj.name), id: safeStr(obj.id), cls: safeStr(obj.mdclass.name(1)) };
 }
 
 function safeStr(v) {
@@ -390,17 +413,27 @@ OPS.md_tree = function (a) {
     for (var q = offset; q < total && items.length < limit; q++) {
         var ch = obj.childObject(flat[q].kind, flat[q].j);
         if (!ch) { items.push({ kind: flat[q].kind, error: "null" }); continue; }
-        items.push({ kind: flat[q].kind, name: String(ch.name), id: String(ch.id), cls: String(ch.mdclass.name(1)) });
+        items.push({ kind: flat[q].kind, name: safeStr(ch.name), id: safeStr(ch.id), cls: safeStr(ch.mdclass.name(1)) });
     }
     return { obj: objInfo(obj), kinds: kinds, total: total, offset: offset, limit: limit,
         items: items, hasMore: limit > 0 && offset + items.length < total };
 };
 
 // Список подчинённых заданного вида (имена и uuid) — сверки до/после.
+// Вид по имени -> числовой индекс (как в md_tree): строковый childObjectsCount
+// на 3.0.66 у не-корневых объектов бросал (пробел 4 отчёта 08.11).
 OPS.md_children = function (a) {
+    if (!a.kind) throw new Error("kind обязателен (например «Реквизиты»)");
     var obj = resolve(a);
-    var n = obj.childObjectsCount(a.kind), res = [];
-    for (var i = 0; i < n; i++) { var ch = obj.childObject(a.kind, i); res.push({ name: String(ch.name), id: String(ch.id) }); }
+    var idx = childKindIndex(obj, a.kind);
+    if (idx === null)
+        throw new Error("вид «" + a.kind + "» отсутствует у " + safeStr(obj.mdclass.name(1)) + " " + safeStr(obj.name));
+    var n = obj.childObjectsCount(idx), res = [];
+    for (var i = 0; i < n; i++) {
+        var ch = obj.childObject(a.kind, i);
+        if (!ch) continue;
+        res.push({ name: safeStr(ch.name), id: safeStr(ch.id) });
+    }
     return { obj: objInfo(obj), kind: a.kind, count: n, items: res };
 };
 
@@ -446,9 +479,15 @@ OPS.md_object = function (a) {
     var info = objInfo(obj);
     info.comment = safeStr(obj.comment);
     info.synonymRu = safeStr(obj.synonym("ru"));
-    var mdc = obj.mdclass, props = [], modules = [];
-    for (var i = 0; i < mdc.propertiesCount; i++) {
-        var p = mdc.propertyAt(i), pname = String(p.name(1)), isMod = false;
+    var mdc = obj.mdclass, props = [], modules = [], pcount = 0;
+    try { pcount = mdc.propertiesCount; }
+    catch (ePC) { info.propsError = errStr(ePC); }
+    for (var i = 0; i < pcount; i++) {
+        // propertyAt/p.name не ограждены платформой: на реальных конфигурациях
+        // дескриптор бывает мёртвым и ронял весь md_object голым "Error" (пробел 1).
+        var pname = null, isMod = false;
+        try { pname = String(mdc.propertyAt(i).name(1)); }
+        catch (ePD) { props.push({ index: i, error: "propertyAt(" + i + "): " + errStr(ePD) }); continue; }
         try { isMod = obj.isPropModule(pname); } catch (e) {}
         if (isMod) {
             props.push({ name: pname, isModule: true });
@@ -456,13 +495,13 @@ OPS.md_object = function (a) {
                 var mt = String(obj.getModuleText(pname));
                 modules.push({ prop: pname, hash: fnv1a(normEol(mt)),
                     lines: mt.length ? normEol(mt).split("\n").length : 0 });
-            } catch (e) { modules.push({ prop: pname, error: String(e.description) }); }
+            } catch (e) { modules.push({ prop: pname, error: errStr(e) }); }
         } else {
             var rec = { name: pname };
             try {
                 if (pname == "Тип") rec.value = typeToStr(obj.property(pname));
                 else rec.value = safeStr(obj.property(pname));
-            } catch (e) { rec.value = "?" + e.description; }
+            } catch (e) { rec.value = "?" + errStr(e); }
             props.push(rec);
         }
     }
@@ -1809,7 +1848,7 @@ function handle(file) {
         }
     } catch (e) {
         stat.errors++;
-        resp.error = { code: "exception", message: String(e.description || e.message || e),
+        resp.error = { code: "exception", message: errStr(e),
             where: resp.where || { op: req && req.op } };
         try { if (fso.FileExists(path)) fso.DeleteFile(path, true); } catch (e2) {}
     }
