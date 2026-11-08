@@ -21,7 +21,9 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-DEFAULT_ROOT = Path(r"Y:\Snegopat-mcp\mcp")
+# умолчание совпадает с аварийным умолчанием моста (v1.2); боевой путь всегда
+# в конфиге — установщик пишет <дом>\mcp в mcp_snegopat.json
+DEFAULT_ROOT = Path(r"C:\Snegopat-mcp\mcp")
 
 
 @dataclass
@@ -44,6 +46,13 @@ class Config:
     # heartbeat старше этого + живой pid = мост занят долгой операцией (не «мёртв»)
     heartbeat_stale_s: float = 30.0
     journal_path: Path | None = None  # умолчание: <root>/journal.jsonl
+    # журнал регистрации (этап 18/19): настройки пишутся инструментом
+    # journal_configure в <root>/mcp_bridge.cfg.json (их читает МОСТ) и
+    # дублируются здесь (для md_journal: где искать и что показывать)
+    journal_enabled: bool = True       # false = мост не пишет журнал
+    journal_kinds: list[int] = field(default_factory=list)  # пусто = все виды
+    journal_max_mb: float = 20.0       # ротация: размер файла
+    journal_keep: int = 3              # ротация: сколько ротированных хранить
 
 
 def load_config(path: str | os.PathLike | None = None) -> Config:
@@ -81,6 +90,10 @@ def _apply(cfg: Config, data: dict) -> None:
             cfg.root = Path(value)
         elif key == "journal_path":
             cfg.journal_path = Path(value) if value else None
+        elif key == "journal_kinds":
+            if not isinstance(value, list) or not all(isinstance(v, int) for v in value):
+                raise ValueError("journal_kinds должно быть списком целых")
+            cfg.journal_kinds = value
         elif isinstance(cur, bool):
             if not isinstance(value, bool):
                 raise ValueError(f"{key} должно быть true/false")

@@ -883,6 +883,51 @@ class Toolkit:
                 "kinds": {k: sum(1 for e in entries if e.get("kindName") == k)
                           for k in sorted({e.get("kindName", "?") for e in entries})}}
 
+    def journal_configure(self, enabled: bool | None = None,
+                          kinds: list[int] | None = None,
+                          max_mb: float | None = None, keep: int | None = None) -> dict:
+        """Настроить журнал регистрации (этап 18/19): пишет <root>/mcp_bridge.cfg.json,
+        который МОСТ читает без перезапуска конфигуратора (перечитывает по mtime
+        на каждом событии): enabled (вкл/выкл записи), kinds (фильтр видов 0..6:
+        0=AddChild,1=PropChanged,2=DeleteChild,3=Changed,4=Save,5=Close,6=AfterSave;
+        пусто = все), max_mb/keep (ротация journal/<pid>.jsonl). Те же значения
+        дублируются в конфиг сервера (для md_journal). Без аргументов — вернуть
+        текущее состояние (файл конфига моста)."""
+        import json as _json
+        cfg_file = Path(self.cfg.root) / "mcp_bridge.cfg.json"
+        current: dict = {}
+        if cfg_file.is_file():
+            try:
+                current = _json.loads(cfg_file.read_text(encoding="utf-8-sig"))
+            except Exception:
+                current = {}
+        j = current.get("journal") or {}
+        if enabled is not None:
+            j["enabled"] = bool(enabled)
+        if kinds is not None:
+            if not isinstance(kinds, list) or not all(isinstance(k, int) and 0 <= k <= 6 for k in kinds):
+                raise BridgeError("bad_args", "kinds: список целых 0..6 (пусто = все виды)")
+            j["kinds"] = kinds
+        if max_mb is not None:
+            if max_mb <= 0:
+                raise BridgeError("bad_args", "max_mb должно быть положительным")
+            j["maxFileMB"] = float(max_mb)
+        if keep is not None:
+            if keep < 1:
+                raise BridgeError("bad_args", "keep >= 1")
+            j["keepFiles"] = int(keep)
+        current["journal"] = j
+        cfg_file.parent.mkdir(parents=True, exist_ok=True)
+        cfg_file.write_text(_json.dumps(current, ensure_ascii=False, indent=1),
+                            encoding="utf-8")
+        # дублировать в конфиг сервера (md_journal читает эти умолчания)
+        self.cfg.journal_enabled = j.get("enabled", True)
+        self.cfg.journal_kinds = j.get("kinds", [])
+        self.cfg.journal_max_mb = j.get("maxFileMB", 20.0)
+        self.cfg.journal_keep = j.get("keepFiles", 3)
+        return {"cfg_file": str(cfg_file), "journal": j,
+                "note": "мост применяет без перезапуска (перечитывает по mtime)"}
+
     def ext_save(self, session: int, name: str) -> dict:
         """Сохранить расширение (штатное «Сохранить документ» при активном дереве
         расширения — Frame.FileSave). Проверено живьём (28.10.2026): isModified → False,
@@ -1144,7 +1189,7 @@ _TOOLS = [
     "cfgstore_capture", "cfgstore_commit",
     "form_export", "form_import", "form_get_xml", "form_set_xml",
     "ext_list", "ext_dump_cfe", "ext_save", "ext_create", "ext_open",
-    "ext_build_from_cf", "md_check_refs", "md_journal",
+    "ext_build_from_cf", "md_check_refs", "md_journal", "journal_configure",
     "tree_activate", "tree_activate_group", "dialog_probe",
     "bridge_wait", "bridge_stats", "focus_probe",
 ]

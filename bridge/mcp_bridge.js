@@ -19,20 +19,52 @@ global.connectGlobals(SelfScript);
 
 // ---------- конфигурация ----------
 
-var ROOT = "Y:\\Snegopat-mcp\\mcp\\";
+// Пути НЕ захардкожены (v1.2): дом определяется (1) env MCP_SNEGOPAT_HOME,
+// (2) walk-up от каталога аддина до маркера mcp\mcp_bridge.home (ставит установщик),
+// (3) аварийно C:\Snegopat-mcp (session_info покажет home — маркера там не будет).
+var fso = new ActiveXObject("Scripting.FileSystemObject");
+var HOME = "";
+(function findHome() {
+    try {
+        var sh = new ActiveXObject("WScript.Shell");
+        HOME = String(sh.Environment("PROCESS")("MCP_SNEGOPAT_HOME") || "")
+            || String(sh.Environment("USER")("MCP_SNEGOPAT_HOME") || "");
+    } catch (e0) { HOME = ""; }
+    if (!HOME) {
+        var fp = "";
+        try { fp = String(SelfScript.fullPath); } catch (e1) {}
+        var dir = fp.replace(/[\\\/][^\\\/]*$/, "");
+        for (var i = 0; i < 8 && dir; i++) {
+            if (fso.FileExists(dir + "\\mcp\\mcp_bridge.home")) { HOME = dir; break; }
+            dir = dir.replace(/[\\\/][^\\\/]+$/, "");
+        }
+    }
+    if (!HOME) HOME = "C:\\Snegopat-mcp";
+    // маркер загрузки: всегда (диагностика «аддин не загрузился/дом не тот»)
+    try {
+        if (!fso.FolderExists(HOME + "\\mcp")) fso.CreateFolder(HOME + "\\mcp");
+        writeUtf8Atomic(HOME + "\\mcp\\mcp_bridge-load.txt",
+            "loaded " + new Date().getTime() + " pid=" + myPid + " home=" + HOME);
+    } catch (eTrace) {}
+})();
+var ROOT = HOME + "\\mcp\\";
 var TIMER_MS = 150;
 var RESP_CACHE_MAX = 256;
 var ENABLE_FILE = ROOT + "mcp_bridge.on";
 var SESSION_DIR = ROOT + "sessions\\" + Designer.processId() + "\\";
 var REQ_DIR = SESSION_DIR + "req\\";
 var RESP_DIR = SESSION_DIR + "resp\\";
-var BACKUPS_DIR = "Y:\\Snegopat-mcp\\backups\\";
+var BACKUPS_DIR = HOME + "\\backups\\";
 var FORMS_DIR = ROOT + "forms\\";
 var JOURNAL_DIR = ROOT + "journal\\";
 var MD_KINDS = ["AddChild", "PropChanged", "DeleteChild", "Changed", "Save", "Close", "AfterSave"];
 var journalFile = JOURNAL_DIR + Designer.processId() + ".jsonl";
 var journalCount = 0;
-var BRIDGE_VERSION = "1.1";
+// журнал настраивается файлом <mcp>\mcp_bridge.cfg.json (пишет journal_configure,
+// применяет мост: читает при старте + перечитывает по mtime на каждом событии)
+var journalCfg = { enabled: true, kinds: [], maxFileMB: 20, keepFiles: 3 };
+var journalCfgStamp = "";
+var BRIDGE_VERSION = "1.2";
 
 // Операции, помечаемые running в сессии (план §4.2: долгие блокируют мост на минуты)
 var LONG_OPS = {
@@ -43,9 +75,13 @@ var LONG_OPS = {
 var CFG_GROUP = "{F10CBB81-F679-11D4-9DD3-0050BAE2BC79}";
 var STG_GROUP = "{5679B714-7E65-4ED4-92BF-6DDD604C6EA3}";
 
-var fso = new ActiveXObject("Scripting.FileSystemObject");
 var busy = false;
 var timerId = 0;
+// белые списки путей cf (v1.2: от HOME, не от буквы диска); строится после HOME
+var CF_PATH_RE = new RegExp("^" + HOME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    + "\\\\(backups|verify)\\\\[A-Za-z0-9_.\\-\\\\]+\\.cf$");
+var CF_BACKUP_RE = new RegExp("^" + HOME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    + "\\\\backups\\\\[A-Za-z0-9_.\\-]+\\.cf$");
 var stat = { ticks: 0, ticksInModal: 0, ticksBusy: 0, done: 0, replayed: 0, errors: 0, lastError: null, startedAt: new Date().getTime() };
 var myPid = Designer.processId();
 var sessionFile = SESSION_DIR + "session.json";
@@ -294,8 +330,8 @@ OPS.send_cfg_cmd = function (a) {
 OPS.session_info = function (a) {
     return { pid: myPid, conn: sessionBase.conn, platform: sessionBase.platform,
         bridge: BRIDGE_VERSION, modalMode: windows.modalMode, running: running,
-        containers: containersInfo(), stat: stat,
-        journal: { file: journalFile, count: journalCount } };
+        containers: containersInfo(), stat: stat, home: HOME,
+        journal: { file: journalFile, count: journalCount, cfg: journalCfg } };
 };
 
 // Счёт объектов верхнего уровня по всем видам корня.
@@ -815,7 +851,7 @@ function onMsgBoxLoadMcp(mb) {
 }
 OPS.cfg_load_cf = function (a) {
     var path = String(a.cf || "");
-    if (!/^Y:\\Snegopat-mcp\\(backups|verify)\\[A-Za-z0-9_.\-\\]+\.cf$/.test(path) || !fso.FileExists(path))
+    if (!CF_PATH_RE.test(path) || !fso.FileExists(path))
         throw new Error("недопустимый или отсутствующий cf: " + path);
     var c = container(a.container);
     if (c.isModified) throw new Error("контейнер изменён (isModified=true) — загрузка отклонена (потеря правок)");
@@ -843,7 +879,7 @@ OPS.cfg_load_cf = function (a) {
 
 // Сохранение конфигурации (Config, 3). Только при архиве cf, снятом в этой сессии (инвариант 5).
 OPS.config_save = function (a) {    var arch = String(a.archive || "");
-    if (!/^Y:\\Snegopat-mcp\\backups\\[A-Za-z0-9_.\-]+\.cf$/.test(arch) || !fso.FileExists(arch) || fso.GetFile(arch).Size == 0)
+    if (!CF_BACKUP_RE.test(arch) || !fso.FileExists(arch) || fso.GetFile(arch).Size == 0)
         throw new Error("нет архива cf перед сохранением: " + arch);
     var c = container(a.container);
     var before = c.isModified;
@@ -916,12 +952,57 @@ function onMdAdd(e) {
     } catch (x) {}
 }
 
+// Настройки журнала из <mcp>\mcp_bridge.cfg.json: enabled, kinds[], maxFileMB,
+// keepFiles. Перечитывается по mtime — применение без перезапуска конфигуратора.
+function readBridgeCfg() {
+    var p = ROOT + "mcp_bridge.cfg.json";
+    if (!fso.FileExists(p)) return;
+    var mt = String(fso.GetFile(p).DateLastModified);
+    if (mt === journalCfgStamp) return;
+    journalCfgStamp = mt;
+    try {
+        var c = JSON.parse(readUtf8(p));
+        if (c.journal) {
+            journalCfg.enabled = c.journal.enabled !== false;
+            journalCfg.kinds = c.journal.kinds || [];
+            if (c.journal.maxFileMB) journalCfg.maxFileMB = c.journal.maxFileMB;
+            if (c.journal.keepFiles) journalCfg.keepFiles = c.journal.keepFiles;
+        }
+    } catch (e) {}
+}
+
+// Ротация: journal/<pid>.jsonl -> .1 -> .2 ... (хранить keepFiles штук)
+function rotateJournal() {
+    try {
+        if (!fso.FileExists(journalFile)) return;
+        if (fso.GetFile(journalFile).Size <= journalCfg.maxFileMB * 1048576) return;
+        var keep = journalCfg.keepFiles;
+        if (keep < 1) keep = 1;
+        for (var i = keep - 1; i >= 1; i--) {
+            var a = journalFile + "." + i;
+            if (fso.FileExists(a)) {
+                if (i + 1 >= keep) fso.DeleteFile(a, true);
+                else fso.MoveFile(a, journalFile + "." + (i + 1));
+            }
+        }
+        if (keep > 1) {
+            if (fso.FileExists(journalFile + ".1")) fso.DeleteFile(journalFile + ".1", true);
+            fso.MoveFile(journalFile, journalFile + ".1");
+        } else {
+            fso.DeleteFile(journalFile, true);
+        }
+    } catch (e) {}
+}
+
 // Журнал MetaDataEvent (этап 18): ВСЕ изменения метаданных — человек и мост.
 // src=agent, пока busy (инвариант 2: идёт обработка запроса моста), иначе human.
 // Файл journal/<pid>.jsonl в UTF-16 (FSO append), постусловие не требуется —
 // журнал диагностический, ошибки записи молча глотаются.
 function onMdJournal(e) {
     try {
+        readBridgeCfg();
+        if (!journalCfg.enabled) return;
+        if (journalCfg.kinds.length && !inArray(journalCfg.kinds, e.kind)) return;
         var rec = { ts: new Date().getTime(), pid: myPid, src: busy ? "agent" : "human",
             kind: e.kind, kindName: MD_KINDS[e.kind] || String(e.kind), request: !!e.request };
         try { rec.obj = { id: String(e.obj.id), name: String(e.obj.name),
@@ -931,6 +1012,7 @@ function onMdJournal(e) {
             try { rec.container = String(e.parentObj.container.get_identifier()); } catch (x2) {}
         }
         if (!fso.FolderExists(JOURNAL_DIR)) fso.CreateFolder(JOURNAL_DIR);
+        rotateJournal();
         var f = fso.OpenTextFile(journalFile, 8, true, -1);
         f.WriteLine(JSON.stringify(rec));
         f.Close();
@@ -1777,7 +1859,9 @@ if (fso.FileExists(ENABLE_FILE)) {
     if (!fso.FolderExists(REQ_DIR)) fso.CreateFolder(REQ_DIR);
     if (!fso.FolderExists(RESP_DIR)) fso.CreateFolder(RESP_DIR);
     // журнал MetaDataEvent (этап 18): постоянная подписка — все изменения
-    // метаданных пишутся в journal/<pid>.jsonl (UTF-16, append); src=agent по busy
+    // метаданных пишутся в journal/<pid>.jsonl (UTF-16, append); src=agent по busy;
+    // настройки — <mcp>\mcp_bridge.cfg.json (v1.2: вкл/выкл, фильтр видов, ротация)
+    readBridgeCfg();
     if (!fso.FolderExists(JOURNAL_DIR)) fso.CreateFolder(JOURNAL_DIR);
     try { events.connect(metadata, "MetaDataEvent", SelfScript.self, "onMdJournal"); }
     catch (eJ) { writeUtf8Atomic(SESSION_DIR + "journal-error.txt", String(eJ.description || eJ.message || eJ)); }

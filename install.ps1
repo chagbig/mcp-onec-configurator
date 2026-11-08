@@ -1,92 +1,160 @@
-﻿# install.ps1 — установщик поставки mcp-configurator v1.1.0
-# Целевая раскладка жёсткая: мост пишет в <Drive>:\Snegopat-mcp\mcp (константы моста).
+﻿# install.ps1 — установщик поставки mcp-configurator v1.2.0
+# Пути НЕ привязаны к диску: дом задаётся -HomeDir (любой путь без кириллицы),
+# мост находит его сам (env MCP_SNEGOPAT_HOME + маркер mcp\mcp_bridge.home).
+# Снегопат берётся из zip (любая версия формата snegopat-client), ПОЛНЫЙ комплект
+# без обрезки; мост включается как пользовательский аддин (snegopat.set).
 # Запуск из корня распакованной поставки:
-#   powershell.exe -NoProfile -ExecutionPolicy Bypass -File install.ps1 [-Drive Y]
-# Повторный запуск поверх установленного: снегопат-сборка уезжает в
-#   <Drive>:\Snegopat-mcp\x64-backup-<штамп>, проект обновляется поверх (git — путь обновлений).
+#   powershell.exe -NoProfile -ExecutionPolicy Bypass -File install.ps1
+# Ключи: -HomeDir C:\Snegopat-mcp | -SnegopatZip <путь> | -SkipPip | -SkipSnegopat
 param(
-    [string]$Drive = "Y:",
+    [string]$HomeDir = "C:\Snegopat-mcp",
+    [string]$SnegopatZip = "",
     [switch]$SkipPip,
     [switch]$SkipSnegopat
 )
 $ErrorActionPreference = "Stop"
 $Stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$Root = Join-Path $Drive "Snegopat-mcp"
 
 function Fail($msg) { Write-Host "ОТКАЗ: $msg" -ForegroundColor Red; exit 1 }
 function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 
-Write-Host "=== Установка mcp-configurator v1.1.0 в $Root ==="
+Write-Host "=== Установка mcp-configurator v1.2.0 в $HomeDir ==="
 
 # ---------- 1. Проверки окружения ----------
 Step "Проверки окружения"
 $Platform = "C:\Program Files\1cv8\8.3.27.2074\bin\1cv8.exe"
 if (-not (Test-Path $Platform)) {
-    Fail "Платформа 1С 8.3.27.2074 не найдена ($Platform). Установите её и повторите."
+    Write-Host "    ВНИМАНИЕ: платформа 8.3.27.2074 не найдена ($Platform) —" -ForegroundColor Yellow
+    Write-Host "    продолжаю (мост стартует только на поддерживаемой платформе)." -ForegroundColor Yellow
 }
 $py = Get-Command python -ErrorAction SilentlyContinue
-if (-not $py) { Fail "python не найден в PATH. Установите Python >= 3.11 (галочка 'Add to PATH')."}
+if (-not $py) { Fail "python не найден в PATH. Установите Python >= 3.11 (галочка 'Add to PATH')." }
 $pyVer = (& python --version) 2>&1
 if ($pyVer -notmatch "3\.(\d+)\.") { Fail "Не удалось определить версию Python: $pyVer" }
 if ([int]$Matches[1] -lt 11) { Fail "Нужен Python >= 3.11, найден: $pyVer" }
-if (-not (Test-Path ($Drive + "\"))) { Fail "Диска $Drive нет. Мост жёстко пишет в ${Drive}:\Snegopat-mcp\mcp (константы bridge/mcp_bridge.js)." }
 
-# ---------- 2. Снегопат (модифицированная сборка 1.6.43) ----------
+# ---------- 2. Снегопат из zip (любая версия формата snegopat-client) ----------
+# раскладка: пакет (install.ps1 + mcp-configurator\ рядом) или репо (всё в корне)
+$LayoutProj = Join-Path $PSScriptRoot "mcp-configurator"
+$IsPackage = Test-Path (Join-Path $LayoutProj "server")
+$ProjSrc = if ($IsPackage) { $LayoutProj } else { $PSScriptRoot }
+$BridgeSrc = Join-Path $PSScriptRoot "bridge\mcp_bridge.js"
+if (-not (Test-Path $BridgeSrc)) { $BridgeSrc = Join-Path $ProjSrc "bridge\mcp_bridge.js" }
+$Gen = Join-Path $ProjSrc "server\tools\make_snegopat_set.py"
+$TplCfg = Join-Path $ProjSrc "server\mcp_snegopat.json.example"
+$SnegRoot = ""
 if (-not $SkipSnegopat) {
-    Step "Снегопат 1.6.43 -> $Root\x64"
-    $src = Join-Path $PSScriptRoot "snegopat-x64"
-    if (-not (Test-Path $src)) { Fail "в поставке нет snegopat-x64 (собиралась без снегопата?)" }
-    if (Test-Path (Join-Path $Root "x64")) {
-        $bak = Join-Path $Root "x64-backup-$Stamp"
-        Move-Item (Join-Path $Root "x64") $bak
+    Step "Снегопат из zip"
+    if (-not $SnegopatZip) {
+        $cand = Get-ChildItem $PSScriptRoot -Filter "snegopat-client-*.zip" | Select-Object -First 1
+        if (-not $cand) { Fail "в поставке нет snegopat-client-*.zip (собиралась без снегопата?)" }
+        $SnegopatZip = $cand.FullName
+    }
+    if (-not (Test-Path $SnegopatZip)) { Fail "не найден $SnegopatZip" }
+    $tmp = Join-Path $env:TEMP ("sneg-install-" + $Stamp)
+    Expand-Archive -Path $SnegopatZip -DestinationPath $tmp -Force
+    $inner = Get-ChildItem $tmp -Directory | Select-Object -First 1
+    $srcX64 = Join-Path $inner.FullName "x64"
+    if (-not (Test-Path $srcX64)) { Fail "в zip нет x64: $SnegopatZip" }
+    # версия из version.json
+    $vj = Get-Content (Join-Path $srcX64 "version.json") -Raw | ConvertFrom-Json
+    $Ver = $vj.ours
+    if (-not $Ver) { Fail "в version.json нет поля ours" }
+    Write-Host "    Снегопат $Ver (сборка $($vj.released))"
+    $SnegRoot = Join-Path $HomeDir "snegopat\$Ver"
+    if (Test-Path (Join-Path $SnegRoot "x64")) {
+        $bak = Join-Path $SnegRoot ("x64-backup-" + $Stamp)
+        Move-Item (Join-Path $SnegRoot "x64") $bak
         Write-Host "    прежняя сборка сохранена: $bak"
     }
-    New-Item -ItemType Directory -Path (Join-Path $Root "x64") -Force | Out-Null
-    robocopy $src (Join-Path $Root "x64") /E /NFL /NDL /NJH /NJS | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $SnegRoot "x64") -Force | Out-Null
+    robocopy $srcX64 (Join-Path $SnegRoot "x64") /E /NFL /NDL /NJH /NJS | Out-Null
     if ($LASTEXITCODE -ge 8) { Fail "robocopy снегопата: код $LASTEXITCODE" }
+    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+
     # пользовательские каталоги — пустыми
-    foreach ($d in "logs", "data", "autosavedata", "journal") {
-        New-Item -ItemType Directory -Path (Join-Path $Root "x64\$d") -Force | Out-Null
+    foreach ($d in "logs", "autosavedata", "journal") {
+        New-Item -ItemType Directory -Path (Join-Path $SnegRoot "x64\$d") -Force | Out-Null
+    }
+    if (-not (Test-Path (Join-Path $SnegRoot "x64\data"))) {
+        New-Item -ItemType Directory -Path (Join-Path $SnegRoot "x64\data") -Force | Out-Null
+    }
+
+    # мост -> addins\mcp (в КАЖДУЮ версию снегопата)
+    $AddinDir = Join-Path $SnegRoot "x64\modules\snegopat\addins\mcp"
+    New-Item -ItemType Directory -Path $AddinDir -Force | Out-Null
+    Copy-Item $BridgeSrc (Join-Path $AddinDir "mcp_bridge.js") -Force
+
+    # main.js НЕ патчится (полный комплект без обрезки); мост включается
+    # пользовательским аддином через snegopat.set
+    Step "Включение моста в snegopat.set (пользовательский аддин)"
+    $SetDir = Join-Path $SnegRoot "x64\data\Snegopat\settings"
+    $Factory = Join-Path $SnegRoot "x64\data\Snegopat\defaults\snegopat.set"
+    New-Item -ItemType Directory -Path $SetDir -Force | Out-Null
+    if (Test-Path $Factory) {
+        & python $Gen --src $Factory --out (Join-Path $SetDir "snegopat.set")
+    } else {
+        & python $Gen --fresh --out (Join-Path $SetDir "snegopat.set")
+    }
+    if ($LASTEXITCODE -ne 0) { Fail "make_snegopat_set: код $LASTEXITCODE" }
+    # _version рядом (формат профайла Снегопата)
+    $SetDirDef = Join-Path $SnegRoot "x64\data\Snegopat\defaults"
+    if (Test-Path (Join-Path $SetDirDef "_version")) {
+        Copy-Item (Join-Path $SetDirDef "_version") (Join-Path $SetDir "_version") -Force
     }
 } else { Step "Снегопат пропущен (-SkipSnegopat)" }
 
-# ---------- 3. Каталоги моста и флаг включения ----------
-Step "Каталоги моста"
+# ---------- 3. Дом: каталоги моста, маркер, флаг, конфиг ----------
+Step "Дом: $HomeDir"
 foreach ($d in "mcp\sessions", "mcp\journal", "mcp\forms", "backups", "bin", "verify", "temp") {
-    New-Item -ItemType Directory -Path (Join-Path $Root $d) -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $HomeDir $d) -Force | Out-Null
 }
-$OnFlag = Join-Path $Root "mcp\mcp_bridge.on"
+New-Item -ItemType File -Path (Join-Path $HomeDir "mcp\mcp_bridge.home") -Force | Out-Null
+$OnFlag = Join-Path $HomeDir "mcp\mcp_bridge.on"
 if (-not (Test-Path $OnFlag)) { New-Item -ItemType File -Path $OnFlag | Out-Null }
 
-# ---------- 4. Конфиг сервера ----------
-Step "Конфиг сервера mcp_snegopat.json"
-$Cfg = Join-Path $Root "mcp\mcp_snegopat.json"
-if (-not (Test-Path $Cfg)) {
-    $tpl = Join-Path $PSScriptRoot "mcp-configurator\server\mcp_snegopat.json.example"
-    $j = Get-Content $tpl -Raw -Encoding UTF8
-    $j = $j.Replace("Y:\\Snegopat-mcp\\mcp", "$Drive`:\\Snegopat-mcp\\mcp")
-    # own_bases поставки не содержит — владелец дописывает свои базы
+$Cfg = Join-Path $HomeDir "mcp\mcp_snegopat.json"
+# КОНФИГ НИКОГДА НЕ ПЕРЕЗАПИСЫЕТСЯ (в нём own_bases и allow-флаги владельца).
+if (Test-Path -LiteralPath $Cfg) {
+    Write-Host "    конфиг уже есть — не тронут: $Cfg"
+} else {
+    $j = Get-Content $TplCfg -Raw -Encoding UTF8
+    $j = $j.Replace("C:\\Snegopat-mcp\\mcp", $HomeDir.Replace("\", "\\") + "\\mcp")
     [System.IO.File]::WriteAllText($Cfg, $j, (New-Object System.Text.UTF8Encoding($true)))
     Write-Host "    создан $Cfg — допишите свои базы в own_bases (формат: File=`"путь`";)"
-} else { Write-Host "    уже есть — не тронут" }
+}
+if (-not (Test-Path -LiteralPath $Cfg)) { Fail "конфиг отсутствует после установки: $Cfg" }
 
-# ---------- 5. DynamicWrapperX (per-user, без админа) ----------
+# env пользователя: мост и сервер находят дом без угадывания
+[Environment]::SetEnvironmentVariable("MCP_SNEGOPAT_HOME", $HomeDir, "User")
+[Environment]::SetEnvironmentVariable("MCP_SNEGOPAT_CONFIG", $Cfg, "User")
+Write-Host "    env (User): MCP_SNEGOPAT_HOME=$HomeDir; MCP_SNEGOPAT_CONFIG=$Cfg"
+
+# ---------- 4. DynamicWrapperX (per-user, без админа) ----------
 Step "DynamicWrapperX 2.2.0.0 (per-user регистрация)"
-$Dwx = Join-Path $Root "bin\dynwrapx.dll"
-Copy-Item (Join-Path $PSScriptRoot "bin\dynwrapx.dll") $Dwx -Force
-Copy-Item (Join-Path $PSScriptRoot "bin\dynwrapx32.dll") (Join-Path $Root "bin\dynwrapx32.dll") -Force
-Copy-Item (Join-Path $PSScriptRoot "bin\DWX-Help_Ru.chm") (Join-Path $Root "bin\DWX-Help_Ru.chm") -Force
+$Dwx = Join-Path $HomeDir "bin\dynwrapx.dll"
+$DwxSrcPkg = Join-Path $PSScriptRoot "bin\dynwrapx.dll"
+$DwxSrcHome = Join-Path $HomeDir "bin\dynwrapx.dll"
+if (Test-Path $DwxSrcPkg) {
+    New-Item -ItemType Directory -Path (Join-Path $HomeDir "bin") -Force | Out-Null
+    Copy-Item $DwxSrcPkg $Dwx -Force
+    Copy-Item (Join-Path $PSScriptRoot "bin\dynwrapx32.dll") (Join-Path $HomeDir "bin\dynwrapx32.dll") -Force
+    Copy-Item (Join-Path $PSScriptRoot "bin\DWX-Help_Ru.chm") (Join-Path $HomeDir "bin\DWX-Help_Ru.chm") -Force
+} elseif (Test-Path $DwxSrcHome) {
+    Write-Host "    в пакете нет bin\ — используется уже установленный $DwxSrcHome"
+} else {
+    Fail "dynwrapx.dll не найден ни в пакете ($DwxSrcPkg), ни в $DwxSrcHome"
+}
 regsvr32 /i $Dwx | Out-Null
 if ($LASTEXITCODE -ne 0) { Fail "regsvr32 /i dynwrapx.dll: код $LASTEXITCODE" }
 Write-Host "    зарегистрирован per-user (HKCU): $Dwx"
 
-# ---------- 6. Проект и пакет Python ----------
-Step "Проект -> $Drive\mcp-configurator"
-$ProjSrc = Join-Path $PSScriptRoot "mcp-configurator"
-$ProjDst = Join-Path $Drive "mcp-configurator"
+# ---------- 5. Проект и пакет Python ----------
+Step "Проект -> $HomeDir\mcp-configurator"
+$ProjDst = Join-Path $HomeDir "mcp-configurator"
 if (-not (Test-Path $ProjSrc)) { Fail "в поставке нет mcp-configurator" }
 if (Test-Path $ProjDst) {
-    Write-Host "    каталог уже существует — обновляю файлы поверх (незакоммиченные правки сохраняются, git pull — путь обновлений)"
+    Write-Host "    каталог уже существует — обновляю файлы поверх (git pull — путь обновлений)"
 }
 robocopy $ProjSrc $ProjDst /E /NFL /NDL /NJH /NJS /XD __pycache__ .git | Out-Null
 if ($LASTEXITCODE -ge 8) { Fail "robocopy проекта: код $LASTEXITCODE" }
@@ -98,23 +166,27 @@ if (-not $SkipPip) {
     Pop-Location
 } else { Step "pip пропущен (-SkipPip)" }
 
-# ---------- 7. Старт стартера ----------
-Step "Стартер Снегопата (резидентный инжектор)"
-$Starter = Join-Path $Root "x64\starter.exe"
-$Running = Get-Process starter -ErrorAction SilentlyContinue
-if (-not $Running) {
-    Start-Process -FilePath $Starter -WorkingDirectory (Join-Path $Root "x64")
-    Start-Sleep -Seconds 3
-    Write-Host "    запущен (cwd = x64 — важно для внедрения)"
-} else { Write-Host "    уже запущен (pid $($Running.Id))" }
+# ---------- 6. Старт стартера (последней установленной версии) ----------
+if ($SnegRoot) {
+    Step "Стартер Снегопата (резидентный инжектор)"
+    $Starter = Join-Path $SnegRoot "x64\starter.exe"
+    $Running = Get-Process starter -ErrorAction SilentlyContinue
+    if (-not $Running) {
+        Start-Process -FilePath $Starter -WorkingDirectory (Join-Path $SnegRoot "x64")
+        Start-Sleep -Seconds 3
+        Write-Host "    запущен (cwd = x64 — важно для внедрения)"
+    } else { Write-Host "    уже запущен (pid $($Running.Id))" }
+}
 
 # ---------- Готово ----------
 Write-Host ""
 Write-Host "=== УСТАНОВЛЕНО. Дальше вручную: ===" -ForegroundColor Green
 Write-Host "1. ZCode: добавить MCP-сервер в ~/.zcode/cli/config.json -> mcp.servers:"
-Write-Host '   "mcp-snegopat": {"command": "mcp-snegopat"}  (+ env MCP_SNEGOPAT_CONFIG=<Cfg>, если конфиг не в умолчании)'
-Write-Host "2. Свои базы: дописать в own_bases конфига $Cfg (формат: File=`"<путь>`";)"
-Write-Host "3. Конфигуратор: starter.exe уже запущен; живой запуск конфигуратора — строго"
+Write-Host '   "mcp-snegopat": {"command": "mcp-snegopat"}  (+ env MCP_SNEGOPAT_CONFIG, уже в User-env)'
+Write-Host "2. Свои базы: дописать в own_bases конфига $Cfg"
+Write-Host "3. Конфигуратор: starter.exe запущен; живой запуск конфигуратора — строго"
 Write-Host "   1cv8.exe DESIGNER /F <база>  (без слова DESIGNER откроется лаунчер и повиснет)."
-Write-Host "4. Проверка: в ZCode вызвать list_sessions при открытом конфигураторе — мост 1.1."
-Write-Host "Подробности: mcp-configurator\README.md (установка, требования, ловушки)."
+Write-Host "4. Разные версии Снегопата: повторите установку с другим -SnegopatZip —"
+Write-Host "   версии живут параллельно в $HomeDir\snegopat\<версия>\."
+Write-Host "5. Проверка: list_sessions в ZCode при открытом конфигураторе."
+Write-Host "Подробности: РУКОВОДСТВО-АДМИНИСТРАТОРА.md и РУКОВОДСТВО-ПОЛЬЗОВАТЕЛЯ.md."

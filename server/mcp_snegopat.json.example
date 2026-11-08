@@ -1,5 +1,5 @@
 {
-  "root": "Y:\\Snegopat-mcp\\mcp",
+  "root": "C:\\Snegopat-mcp\\mcp",
   "own_bases": [],
   "allow_store": false,
   "allow_update_db": false,
@@ -7,5 +7,9 @@
   "update_db_allowed_dialogs": ["реорганизация информации", "принять"],
   "default_timeout_s": 120,
   "long_timeout_s": 900,
-  "heartbeat_stale_s": 30
+  "heartbeat_stale_s": 30,
+  "journal_enabled": true,
+  "journal_kinds": [],
+  "journal_max_mb": 20.0,
+  "journal_keep": 3
 }

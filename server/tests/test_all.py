@@ -716,6 +716,46 @@ class TestStage15Forms(unittest.TestCase):
         self.assertIsNone(FORMS_RE.match("Documents/МсрТЧ43/Ext/ObjectModule.bsl"))
 
 
+class TestJournalConfigure(Base):
+    """v1.2: journal_configure — конфиг моста mcp_bridge.cfg.json + поля сервера."""
+
+    def test_write_and_defaults(self) -> None:
+        import json as _json
+        cfg_file = Path(self.cfg.root) / "mcp_bridge.cfg.json"
+        res = self.tk.journal_configure(enabled=True, kinds=[0, 2], max_mb=10, keep=2)
+        self.assertTrue(cfg_file.is_file())
+        data = _json.loads(cfg_file.read_text(encoding="utf-8-sig"))
+        self.assertEqual(data["journal"]["kinds"], [0, 2])
+        self.assertEqual(data["journal"]["maxFileMB"], 10.0)
+        self.assertEqual(data["journal"]["keepFiles"], 2)
+        self.assertEqual(res["journal"]["enabled"], True)
+        # серверные поля синхронизированы
+        self.assertEqual(self.tk.cfg.journal_kinds, [0, 2])
+        self.assertEqual(self.tk.cfg.journal_max_mb, 10.0)
+
+    def test_partial_update_keeps_other_keys(self) -> None:
+        import json as _json
+        self.tk.journal_configure(enabled=False, kinds=[1])
+        self.tk.journal_configure(max_mb=5)  # частичное обновление поверх
+        data = _json.loads((Path(self.cfg.root) / "mcp_bridge.cfg.json")
+                           .read_text(encoding="utf-8-sig"))
+        self.assertEqual(data["journal"]["enabled"], False)
+        self.assertEqual(data["journal"]["kinds"], [1])
+        self.assertEqual(data["journal"]["maxFileMB"], 5.0)
+
+    def test_bad_kinds_rejected(self) -> None:
+        from mcp_snegopat.bridge import BridgeError
+        with self.assertRaises(BridgeError):
+            self.tk.journal_configure(kinds=[9])
+        with self.assertRaises(BridgeError):
+            self.tk.journal_configure(kinds=["AddChild"])
+
+    def test_bad_keep_rejected(self) -> None:
+        from mcp_snegopat.bridge import BridgeError
+        with self.assertRaises(BridgeError):
+            self.tk.journal_configure(keep=0)
+
+
 class TestMdJournal(Base):
     """Этап 18: чтение журнала MetaDataEvent (JSONL в UTF-16 от моста 1.1+)."""
 
@@ -764,6 +804,67 @@ class TestMdJournal(Base):
             self.assertEqual(res["entries"], [])
             self.assertIn("журнала нет", res["note"])
 
+
+class TestMakeSnegopatSet(unittest.TestCase):
+    """v1.2: включение моста в snegopat.set (хирургическая вставка листа)."""
+
+    LEAF = r'\n{2,0,2,' + r'\n{"S","script:addins\\Autosave.js"},' + r'\n{"B",0},0}'
+
+    def _fixture(self) -> str:
+        """Реалистичный .set: заводская шапка + верхний лист (формат 3.0.66:
+        внутри ряда после индекса и после loader-строки — лит-\\n)."""
+        tree = (r'{"#",e603c0f2-92fb-4d47-8f38-a44a381cf235,\n{1,\n{2,'
+                r'\n{0,"Addin",\n{"Pattern"},"",0},\n{1,"isGroup",\n{"Pattern"},"",0}\n},'
+                r'\n{2,1,0,0,1,1,\n{1,1,'
+                + self.LEAF +
+                r'\n},-1,0}\n}\n}')
+        return ('Snegopat/Settings/MaximizeWindows\t{"B",1}\n'
+                'Snegopat/LoadAddins\t' + tree + '\n')
+
+    def test_leaf_added_with_counter(self) -> None:
+        import tempfile
+        from make_snegopat_set import add_leaf
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "snegopat.set"
+            p.write_text(self._fixture(), encoding="utf-8")
+            new_text, changed, msg = add_leaf(p.read_text(encoding="utf-8"))
+            self.assertTrue(changed, msg)
+            p.write_text(new_text, encoding="utf-8")
+            t = p.read_text(encoding="utf-8")
+            self.assertIn("mcp_bridge.js", t)
+            self.assertIn("-1,1}", t)  # счётчик последнего индекса 0 -> 1
+
+    def test_idempotent(self) -> None:
+        import tempfile
+        from make_snegopat_set import add_leaf
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "snegopat.set"
+            p.write_text(self._fixture(), encoding="utf-8")
+            new_text, changed, _ = add_leaf(p.read_text(encoding="utf-8"))
+            again, changed2, msg2 = add_leaf(new_text)
+            self.assertFalse(changed2)
+            self.assertIn("уже есть", msg2)
+            self.assertEqual(again, new_text)
+
+    def test_missing_key_rejected(self) -> None:
+        from make_snegopat_set import add_leaf
+        new_text, changed, msg = add_leaf("Другой/Ключ\t{\"B\",1}\n")
+        self.assertFalse(changed)
+        self.assertIn("нет ключа", msg)
+
+    def test_row_format_matches_neighbors(self) -> None:
+        import re, tempfile
+        from make_snegopat_set import add_leaf
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "snegopat.set"
+            p.write_text(self._fixture(), encoding="utf-8")
+            new_text, _, _ = add_leaf(p.read_text(encoding="utf-8"))
+            for line in new_text.splitlines():
+                if line.startswith("Snegopat/LoadAddins	"):
+                    v = line.split("	", 1)[1]
+            our = re.search(r'\{2,1,2,\\n\{"S","script:addins\\\\mcp\\\\mcp_bridge\.js"\},'
+                            r'\\n\{"B",0\},0\}', v)
+            self.assertIsNotNone(our)
 
 class TestCreateOwnObject(unittest.TestCase):
     """Этап 19: новый объект cf2 -> собственный объект расширения."""
