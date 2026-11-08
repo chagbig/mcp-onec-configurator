@@ -928,6 +928,41 @@ class Toolkit:
         return {"cfg_file": str(cfg_file), "journal": j,
                 "note": "мост применяет без перезапуска (перечитывает по mtime)"}
 
+    def doctor(self, session: int | None = None) -> dict:
+        """Самодиагностика установки: платформа, стартер, дом (маркер mcp_bridge.home),
+        флаг .on, конфиг/own_bases, DynamicWrapperX, журнал, маркер загрузки моста;
+        при session — плюс живая сессия (bridge/home/журнал). verdict: ok/warn/fail,
+        каждой проверке — подсказка. Работает и БЕЗ конфигуратора (session не указан)."""
+        import sys as _sys
+        sys_tools = Path(__file__).resolve().parents[1] / "tools"
+        if str(sys_tools) not in _sys.path:
+            _sys.path.insert(0, str(sys_tools))
+        from doctor import run_filesystem_checks  # noqa: E402
+        # cfg.root указывает на <дом>\mcp; чек-лист ожидает ДОМ (родителя)
+        res = run_filesystem_checks(Path(self.cfg.root).parent,
+                                    journal_enabled=self.cfg.journal_enabled)
+        live = []
+        if session is not None:
+            try:
+                si = self.session_info(session=session)
+            except Exception as e:
+                live = [{"name": "живая сессия", "status": "warn",
+                         "detail": f"session {session} недоступна: {e}",
+                         "hint": "откройте конфигуратор; стартер должен быть запущен"}]
+            else:
+                live = [{"name": "живая сессия", "status": "ok",
+                         "detail": f"pid {si.get('pid')}, мост {si.get('bridge')}"},
+                        {"name": "дом сессии == cfg.root",
+                         "status": "ok" if si.get("home") == str(self.cfg.root) else "warn",
+                         "detail": str(si.get("home"))},
+                        {"name": "журнал сессии", "status": "ok",
+                         "detail": str((si.get("journal") or {}).get("file"))}]
+        res["checks"] = res["checks"] + live
+        res["verdict"] = ("fail" if any(c["status"] == "fail" for c in res["checks"])
+                          else "warn" if any(c["status"] == "warn" for c in res["checks"])
+                          else "ok")
+        return res
+
     def ext_save(self, session: int, name: str) -> dict:
         """Сохранить расширение (штатное «Сохранить документ» при активном дереве
         расширения — Frame.FileSave). Проверено живьём (28.10.2026): isModified → False,
@@ -1189,7 +1224,7 @@ _TOOLS = [
     "cfgstore_capture", "cfgstore_commit",
     "form_export", "form_import", "form_get_xml", "form_set_xml",
     "ext_list", "ext_dump_cfe", "ext_save", "ext_create", "ext_open",
-    "ext_build_from_cf", "md_check_refs", "md_journal", "journal_configure",
+    "ext_build_from_cf", "md_check_refs", "md_journal", "journal_configure", "doctor",
     "tree_activate", "tree_activate_group", "dialog_probe",
     "bridge_wait", "bridge_stats", "focus_probe",
 ]

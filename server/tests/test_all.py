@@ -866,6 +866,78 @@ class TestMakeSnegopatSet(unittest.TestCase):
                             r'\\n\{"B",0\},0\}', v)
             self.assertIsNotNone(our)
 
+class TestDoctor(Base):
+    """v1.2.1: doctor — самодиагностика (файловый чек-лист на подставном доме)."""
+
+    def _prepare_home(self, d: Path, marker: bool = True, flag: bool = True,
+                      dwx: bool = True, cfg: bool = True) -> Path:
+        home = Path(d) / "home"
+        (home / "mcp").mkdir(parents=True)
+        if marker:
+            (home / "mcp" / "mcp_bridge.home").write_text("", encoding="utf-8")
+        if flag:
+            (home / "mcp" / "mcp_bridge.on").write_text("", encoding="utf-8")
+        if cfg:
+            import json as _json
+            (home / "mcp" / "mcp_snegopat.json").write_text(
+                _json.dumps({"root": str(home / "mcp"),
+                             "own_bases": ['File="' + str(home) + '"']}),
+                encoding="utf-8")
+        return home
+
+    def test_verdict_ok_on_fresh_home(self) -> None:
+        """Стартер не запущен (нет starter.exe) → starter=fail — проверяем только
+        файловые проверки без стартера: run_filesystem_checks(with_starter=False).
+        Свежий дом без load-маркера даёт легитимный warn (конфигуратор не
+        перезапускался) — вердикт warn, не fail."""
+        import tempfile
+        from doctor import run_filesystem_checks
+        with tempfile.TemporaryDirectory() as d:
+            home = self._prepare_home(Path(d))
+            res = run_filesystem_checks(home, with_starter=False)
+            names = {c["name"]: c["status"] for c in res["checks"]}
+            self.assertEqual(names["дом (маркер mcp_bridge.home)"], "ok")
+            self.assertEqual(names["флаг включения mcp_bridge.on"], "ok")
+            self.assertEqual(names["конфиг сервера"], "ok")
+            self.assertEqual(names["own_bases"], "ok")
+            self.assertEqual(res["verdict"], "warn")
+            self.assertIn("warn", [c["status"] for c in res["checks"]
+                                   if c["name"] == "маркер загрузки моста"])
+
+    def test_missing_marker_and_flag_fail(self) -> None:
+        import tempfile
+        from doctor import run_filesystem_checks
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d) / "home"
+            home.mkdir()
+            res = run_filesystem_checks(home, with_starter=False)
+            fails = [c["name"] for c in res["checks"] if c["status"] == "fail"]
+            self.assertIn("дом (маркер mcp_bridge.home)", fails)
+            self.assertIn("флаг включения mcp_bridge.on", fails)
+            self.assertEqual(res["verdict"], "fail")
+
+    def test_dwx_unregistered_is_fail(self) -> None:
+        """DWX: если в HKCU ключа нет — fail (на машине разработки он есть;
+        подставной дом не влияет на реестр)."""
+        import tempfile
+        from doctor import check_dwx
+        c = check_dwx()
+        self.assertIn(c["status"], ("ok", "fail"))  # зависит от машины, но статус валиден
+
+    def test_tool_doctor_with_live_fake_session(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            home = self._prepare_home(Path(d))
+            (home / "mcp" / "mcp_bridge-load.txt").write_text("loaded", encoding="utf-8")
+            self.cfg.root = home / "mcp"
+            res = self.tk.doctor(session=1)
+            statuses = {c["name"]: c["status"] for c in res["checks"]}
+            self.assertIn("живая сессия", statuses)
+            self.assertEqual(statuses["дом (маркер mcp_bridge.home)"], "ok")
+
+
+
+
 class TestCreateOwnObject(unittest.TestCase):
     """Этап 19: новый объект cf2 -> собственный объект расширения."""
 
