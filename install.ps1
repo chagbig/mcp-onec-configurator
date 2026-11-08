@@ -47,6 +47,9 @@ if (-not $SkipSnegopat) {
     Step "Снегопат из zip"
     if (-not $SnegopatZip) {
         $cand = Get-ChildItem $PSScriptRoot -Filter "snegopat-client-*.zip" | Select-Object -First 1
+        if (-not $cand) {
+            $cand = Get-ChildItem (Join-Path $PSScriptRoot "mcp-configurator") -Filter "snegopat-client-*.zip" -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
         if (-not $cand) { Fail "в поставке нет snegopat-client-*.zip (собиралась без снегопата?)" }
         $SnegopatZip = $cand.FullName
     }
