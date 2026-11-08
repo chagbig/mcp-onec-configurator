@@ -963,6 +963,48 @@ class Toolkit:
                           else "ok")
         return res
 
+    def eventlog(self, action: str, base: str, events: list | None = None,
+                 use: bool = True, out_file: str = "",
+                 start: str = "", end: str = "") -> dict:
+        """Настройки журнала регистрации ИБ через внешнее соединение (V83.COMConnector,
+        БЕЗ конфигуратора). Это НЕ метаданные: через rootObject недоступны. Действия:
+        get — использование всех событий + период разделения хранения (8.3.20+);
+        set — включить/выключить события (events: имена вида '_$Data$_.Update' или 'all');
+        split — период разделения хранения: Год|Месяц|День|Неделя|Час|Квартал|НеИспользовать
+        (events=[<период>], монопольный доступ); dump — выгрузить журнал в XML (out_file,
+        фильтр start/end YYYY-MM-DD). base — путь файловой ИБ; требуется монопольный
+        доступ (закройте конфигуратор этой базы). По умолчанию все события журнала
+        ВКЛЮЧЕНЫ платформой."""
+        import sys as _sys
+        sys_tools = Path(__file__).resolve().parents[1] / "tools"
+        if str(sys_tools) not in _sys.path:
+            _sys.path.insert(0, str(sys_tools))
+        from eventlog_cfg import (cmd_get, cmd_set, cmd_split, cmd_dump,
+                                  KNOWN_EVENTS, EventLogError)  # noqa: E402
+        try:
+            if action == "get":
+                return cmd_get(base)
+            if action == "set":
+                if not events:
+                    raise BridgeError("bad_args",
+                                      "events обязателен: имена событий или 'all'")
+                return cmd_set(base, events, use)
+            if action == "split":
+                if not events or len(events) != 1:
+                    raise BridgeError(
+                        "bad_args",
+                        "events=[<период>] — Год|Месяц|День|Неделя|Час|Квартал|НеИспользовать")
+                return cmd_split(base, events[0])
+            if action == "dump":
+                if not out_file:
+                    raise BridgeError("bad_args", "out_file обязателен (путь XML)")
+                return cmd_dump(base, out_file, start or None, end or None)
+            raise BridgeError("bad_args",
+                              "action: get|set|split|dump; события — см. KNOWN_EVENTS "
+                              "в tools/eventlog_cfg.py")
+        except EventLogError as e:
+            raise BridgeError("eventlog_failed", str(e))
+
     def ext_save(self, session: int, name: str) -> dict:
         """Сохранить расширение (штатное «Сохранить документ» при активном дереве
         расширения — Frame.FileSave). Проверено живьём (28.10.2026): isModified → False,
@@ -1225,6 +1267,7 @@ _TOOLS = [
     "form_export", "form_import", "form_get_xml", "form_set_xml",
     "ext_list", "ext_dump_cfe", "ext_save", "ext_create", "ext_open",
     "ext_build_from_cf", "md_check_refs", "md_journal", "journal_configure", "doctor",
+    "eventlog",
     "tree_activate", "tree_activate_group", "dialog_probe",
     "bridge_wait", "bridge_stats", "focus_probe",
 ]

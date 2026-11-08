@@ -1364,6 +1364,43 @@ class TestMcpToLineCfe(unittest.TestCase):
         self.assertEqual(diagnose_delivery_fail("обычная ошибка"), "")
 
 
+class TestEventlogCfg(unittest.TestCase):
+    """Пробел 2 (отчёт 08.11.2026): настройки журнала регистрации ИБ."""
+
+    def test_known_events_valid_shape(self) -> None:
+        from eventlog_cfg import KNOWN_EVENTS
+        self.assertTrue(len(KNOWN_EVENTS) >= 60)
+        for name in KNOWN_EVENTS:
+            self.assertTrue(name.startswith("_$"),
+                            "имя события без префикса группы: " + name)
+        # ключевые события присутствуют
+        for must in ("_$InfoBase$_.ConfigUpdate", "_$Data$_.Update",
+                     "_$InfoBase$_.DBConfigExtensionInsert"):
+            self.assertIn(must, KNOWN_EVENTS)
+
+    def test_set_unknown_event_rejected(self) -> None:
+        from eventlog_cfg import cmd_set, EventLogError
+        with self.assertRaises(EventLogError):
+            cmd_set(r"C:\нет\такой\базы", ["_$Data$_.НеТакое"], True)
+
+    def test_get_requires_existing_base(self) -> None:
+        from eventlog_cfg import cmd_get, EventLogError
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(EventLogError):
+                cmd_get(d)  # нет 1Cv8.1CD
+
+    def test_cli_offline_clear_error(self) -> None:
+        """CLI без COM (база не существует) — понятная ошибка, не traceback."""
+        r = subprocess.run(
+            [sys.executable, "-I",
+             str(ROOT / "server" / "tools" / "eventlog_cfg.py"),
+             "--base", r"C:\нет\такой\базы", "get"],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=60)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("Traceback", r.stderr)
+
+
 class TestServerBuild(unittest.TestCase):
     def test_all_tools_registered(self) -> None:
         import asyncio
