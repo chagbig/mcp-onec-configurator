@@ -355,6 +355,10 @@ _RENAME_SUFFIXES = {
 }
 
 
+_RENAME_KIND_EN = {"ОбщаяФорма": "CommonForm", "Документ": "Document", "Справочник": "Catalog"}
+_RENAME_KIND_RU = {"ОбщаяФорма": "ОбщаяФорма", "Документ": "Документ", "Справочник": "Справочник"}
+
+
 def _rename_refs(text: str, kind_en: str, name: str, ext_name: str) -> str:
     """Квалифицированные ссылки на сам объект: Document.МсрПриёмка ->
     Document.МсрП_МсрПриёмка, включая производные типы (cfg:DocumentRef.X).
@@ -364,13 +368,31 @@ def _rename_refs(text: str, kind_en: str, name: str, ext_name: str) -> str:
     return re.sub(rf"\b({alts})\.{re.escape(name)}\b", rf"\1.{ext_name}", text)
 
 
+def _rename_map_refs(text: str, rename_pairs: list) -> str:
+    """Карта переименований НОВЫХ объектов (этап 19/идея 1): применяется к
+    квалифицированным ссылкам на ЛЮБОЙ новый объект (Document.МсрДругой,
+    Документы.МсрДругой в модулях, русские и английские виды)."""
+    for kind_ru, kind_en, name, ext_name in rename_pairs:
+        suffixes = _RENAME_SUFFIXES.get(kind_en, ("",))
+        alts_en = "|".join(re.escape(kind_en + s) for s in suffixes)
+        text = re.sub(rf"\b({alts_en}|{re.escape(kind_ru)})\.{re.escape(name)}\b",
+                      lambda m, e=ext_name: m.group(0).replace("." + name, "." + e), text)
+    return text
+
+
 def create_own_object(src: Path, dump2: Path, dir_name: str, kind_en: str,
-                      name: str, ext_name: str) -> dict:
-    """Этап 19: собственный объект расширения из нового объекта cf2.
+                      name: str, ext_name: str,
+                      rename_pairs: list | None = None) -> dict:
+    """Этап 19 (+ идея 1): собственный объект расширения из нового объекта cf2.
     Wrapper (новый uuid, имя с префиксом) + поддерево (формы/макеты/модули)
-    с заменой квалифицированных ссылок на сам объект. Own = БЕЗ
+    с заменой ссылок на САМ объект и на другие НОВЫЕ объекты (rename_pairs —
+    карта всех переносимых новых объектов: (kind_ru, kind_en, name, ext_name)).
+    Модули (BSL) обрабатываются той же картой — русские менеджеры
+    (Документы.МсрДругой) и квалификаторы запросов. Own = БЕЗ
     ObjectBelonging=Adopted / ExtendedConfigurationObject. Идемпотентно:
     контент без изменений -> uuid сохраняется."""
+    pairs = list(rename_pairs or [])
+    pairs.append((_RENAME_KIND_RU.get(kind_en, ""), kind_en, name, ext_name))
     src_dir = src / dir_name
     src_dir.mkdir(parents=True, exist_ok=True)
     src_xml = src_dir / (ext_name + ".xml")
@@ -378,7 +400,8 @@ def create_own_object(src: Path, dump2: Path, dir_name: str, kind_en: str,
     if not cf2_xml.is_file():
         return {"ok": False, "err": "в cf2 нет wrapper: %s" % cf2_xml}
     x = cf2_xml.read_text(encoding="utf-8-sig")
-    x = _rename_refs(x, kind_en, name, ext_name)
+    for kr, ke, n, e in pairs:
+        x = _rename_refs(x, ke, n, e)
     x = x.replace("<Name>%s</Name>" % name, "<Name>%s</Name>" % ext_name, 1)
     if src_xml.is_file():
         old = re.sub(r'uuid="[0-9a-f-]{36}"', 'uuid="X"', src_xml.read_text(encoding="utf-8-sig"))
@@ -402,7 +425,23 @@ def create_own_object(src: Path, dump2: Path, dir_name: str, kind_en: str,
             if not p.is_file():
                 continue
             t = p.read_text(encoding="utf-8-sig", errors="replace")
-            t2 = _rename_refs(t, kind_en, name, ext_name)
+            t2 = t
+            for kr, ke, n, e in pairs:
+                t2 = _rename_refs(t2, ke, n, e)
+                # русские менеджеры в модулях: Документы.МсрДругой, Справочники.МсрДругой
+                plural = {"Документ": "Документы", "Справочник": "Справочники"}.get(kr)
+                if plural:
+                    t2 = re.sub(rf"\b({re.escape(plural)})\.{re.escape(n)}\b",
+                                lambda m2, e2=e: m2.group(0).replace("." + n, "." + e2), t2)
+                # русские типы в коде: ДокументСсылка.МсрДругой, СправочникОбъект.X
+                ru_types = {"Документ": ("ДокументСсылка", "ДокументОбъект", "ДокументСписок",
+                                         "ДокументВыборка", "ДокументМенеджер"),
+                            "Справочник": ("СправочникСсылка", "СправочникОбъект",
+                                           "СправочникСписок", "СправочникВыборка",
+                                           "СправочникМенеджер")}.get(kr, ())
+                for rt in ru_types:
+                    t2 = re.sub(rf"\b({re.escape(rt)})\.{re.escape(n)}\b",
+                                lambda m2, e2=e: m2.group(0).replace("." + n, "." + e2), t2)
             # uuid обёрток форм сохраняются как в cf2 (объект новый — конфликтов нет,
             # copytree воспроизводит те же байты — идемпотентность)
             if t2 != t:
@@ -587,8 +626,19 @@ def main(argv=None) -> int:
     report["forms"] = forms_report
 
     # 4c. новые объекты cf2 -> собственные объекты расширения (этап 19; показано
-    # пилотом: вендорская дельта может состоять целиком из новых объектов)
+    # пилотом: вендорская дельта может состоять целиком из новых объектов).
+    # идея 1: карта переименований ВСЕХ переносимых новых объектов передаётся
+    # в create_own_object — ссылки между новыми объектами (XML и модули)
+    # переименовываются согласованно
     new_own = []
+    rename_pairs = []
+    for owner in report.get("new_objects_cf2", []):
+        kind_ru, name = owner.split(".", 1)
+        mk = NEW_OWN_KINDS.get(kind_ru)
+        if not mk:
+            continue
+        ext_name = name if name.startswith(a.prefix) else a.prefix + name
+        rename_pairs.append((kind_ru, mk[1], name, ext_name))
     for owner in report.get("new_objects_cf2", []):
         kind_ru, name = owner.split(".", 1)
         mk = NEW_OWN_KINDS.get(kind_ru)
@@ -597,7 +647,8 @@ def main(argv=None) -> int:
             continue
         dir_name, kind_en = mk
         ext_name = name if name.startswith(a.prefix) else a.prefix + name
-        r19 = create_own_object(src, dump2, dir_name, kind_en, name, ext_name)
+        r19 = create_own_object(src, dump2, dir_name, kind_en, name, ext_name,
+                                rename_pairs=rename_pairs)
         if not r19["ok"]:
             step("новый объект " + owner, False, r19["err"])
             return 1

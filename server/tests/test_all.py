@@ -1016,6 +1016,67 @@ class TestCreateOwnObject(unittest.TestCase):
         self.assertIn("ОбщаяФорма", NEW_OWN_KINDS)
         self.assertEqual(NEW_OWN_KINDS["ОбщаяФорма"], ("CommonForms", "CommonForm"))
 
+    def test_rename_map_between_new_objects(self) -> None:
+        """Идея 1: ссылка нового объекта A на новый объект B переименовывается
+        согласованно (XML-квалификатор и русский менеджер в модуле)."""
+        import tempfile
+        from build_ext import create_own_object
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            dump2 = d / "dump2"
+            # B: Документ.МсрДругой
+            (dump2 / "Documents" / "МсрДругой" / "Ext").mkdir(parents=True)
+            (dump2 / "Documents" / "МсрДругой.xml").write_text(
+                '<MetaDataObject><Document uuid="b"><Properties><Name>МсрДругой</Name>'
+                '</Properties></Document></MetaDataObject>', encoding="utf-8-sig")
+            # A: Документ.МсрГлавный, модуль ссылается на B (русский менеджер)
+            (dump2 / "Documents" / "МсрГлавный" / "Ext").mkdir(parents=True)
+            (dump2 / "Documents" / "МсрГлавный.xml").write_text(
+                '<MetaDataObject><Document uuid="a"><Properties><Name>МсрГлавный</Name>'
+                '</Properties></Document></MetaDataObject>', encoding="utf-8-sig")
+            (dump2 / "Documents" / "МсрГлавный" / "Ext" / "ObjectModule.bsl").write_text(
+                'Процедура ОбработкаПроведения()\n'
+                '\tДок = Документы.МсрДругой.СоздатьДокумент();\n'
+                '	Тип = Тип("ДокументСсылка.МсрДругой");\n'
+                'КонецПроцедуры\n', encoding="utf-8")
+            src = d / "src"
+            pairs = [("Документ", "Document", "МсрДругой", "МсрП_МсрДругой"),
+                     ("Документ", "Document", "МсрГлавный", "МсрП_МсрГлавный")]
+            r1 = create_own_object(src, dump2, "Documents", "Document",
+                                   "МсрДругой", "МсрП_МсрДругой", rename_pairs=pairs)
+            r2 = create_own_object(src, dump2, "Documents", "Document",
+                                   "МсрГлавный", "МсрП_МсрГлавный", rename_pairs=pairs)
+            self.assertTrue(r1["ok"] and r2["ok"], (r1, r2))
+            mod = (src / "Documents" / "МсрП_МсрГлавный" / "Ext" / "ObjectModule.bsl") \
+                .read_text(encoding="utf-8-sig")
+            self.assertIn("Документы.МсрП_МсрДругой", mod)
+            self.assertNotIn("Документы.МсрДругой", mod)
+            self.assertIn('Тип("ДокументСсылка.МсрП_МсрДругой")', mod)
+            self.assertIn("МсрП_МсрГлавный",
+                          (src / "Documents" / "МсрП_МсрГлавный.xml")
+                          .read_text(encoding="utf-8-sig"))
+
+    def test_rename_map_no_false_positives(self) -> None:
+        from build_ext import create_own_object
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            dump2 = d / "dump2"
+            (dump2 / "Documents" / "МсрОдин" / "Ext").mkdir(parents=True)
+            (dump2 / "Documents" / "МсрОдин.xml").write_text(
+                '<MetaDataObject><Document uuid="a"><Properties><Name>МсрОдин</Name>'
+                '</Properties></Document></MetaDataObject>', encoding="utf-8-sig")
+            # чужой вендорский объект с ПОХОЖИМ именем не должен переименоваться
+            (dump2 / "Documents" / "МсрОдинСтарый.xml").write_text(
+                '<MetaDataObject><Document uuid="c"><Properties><Name>МсрОдинСтарый</Name>'
+                '</Properties></Document></MetaDataObject>', encoding="utf-8-sig")
+            src = d / "src"
+            create_own_object(src, dump2, "Documents", "Document",
+                              "МсрОдин", "МсрП_МсрОдин")
+            # чужой вендорский файл вообще не появлялся в src (нет ложных замен)
+            self.assertFalse((src / "Documents" / "МсрОдинСтарый.xml").exists())
+
+
+
 
 class TestRefCheck(Base):
     """Этап 17: поиск ссылок перед удалением (скан XML-выгрузки)."""
