@@ -20,7 +20,6 @@ import ctypes
 import json
 import os
 import sys
-import winreg
 from ctypes import byref, c_void_p, c_wchar_p
 
 COM_PROGID = 'V83.COMConnector'
@@ -92,6 +91,7 @@ class EventLogError(RuntimeError):
 
 def comcntr_dll_path():
     """Путь к comcntr.dll из регистрации V83.COMConnector (HKCR->HKCU/HKLM)."""
+    import winreg  # lazy: winapi только Windows (юнит-тесты и linux-CI без него)
     for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
         try:
             with winreg.OpenKey(hive, 'Software' + '\\' + 'Classes' + '\\' +
@@ -112,8 +112,11 @@ def ensure_typelib():
     Возвращает True, если была выполнена регистрация (исправление), False —
     если typelib уже был зарегистрирован.
     """
-    import pythoncom
-    import pywintypes
+    try:
+        import pythoncom
+        import pywintypes
+    except ImportError:
+        raise EventLogError('нет pywin32 (pythoncom): pip install pywin32')
 
     libid = pywintypes.IID(TYPELIB_ID)
     for major, minor in TYPELIB_VERSIONS:
@@ -149,7 +152,10 @@ def _connect(base=None, conn_str=None):
             raise EventLogError('файловая ИБ не найдена: %s' % base)
         conn_str = 'File="%s";' % base
     ensure_typelib()
-    import win32com.client
+    try:
+        import win32com.client
+    except ImportError:
+        raise EventLogError('нет pywin32 (win32com): pip install pywin32')
     try:
         cn = win32com.client.Dispatch(COM_PROGID)
         return cn.Connect(conn_str)
