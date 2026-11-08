@@ -21,6 +21,7 @@ python ref_check.py <каталог-выгрузки> "Справочник.Но
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -132,9 +133,31 @@ def scan_dump(dump: Path, full_name: str, max_context: int = 5) -> dict:
             break
     truncated = len(hits) >= 100
     hits = hits[:max_context]
+
+    # роли и подписки (v1.1): свой формат ссылок — сканируем по имени объекта
+    # с границей слова; это ДОПОЛНИТЕЛЬНЫЙ advisory-срез (в правах/подписках
+    # короткие имена дают возможные ложные срабатывания — помечено в отчёте)
+    kind_ru, _, obj = full_name.partition(".")
+    extra = {}
+    if obj:
+        wb = re.compile(r"(?<![\wа-яА-ЯёЁ])" + re.escape(obj) + r"(?![\wа-яА-ЯёЁ])")
+        for sub in ("Roles", "EventSubscriptions"):
+            cnt = 0
+            files = []
+            for p in sorted((dump / sub).rglob("*.xml")) if (dump / sub).is_dir() else []:
+                if p in own_files or any(p.is_relative_to(d) for d in own_dirs if d.exists()):
+                    continue
+                t = p.read_text(encoding="utf-8-sig", errors="replace")
+                if wb.search(t):
+                    cnt += 1
+                    if len(files) < 5:
+                        files.append(p.relative_to(dump).as_posix())
+            if cnt:
+                extra[sub] = {"files": cnt, "examples": files}
     return {"ok": True, "target": full_name, "patterns": patterns,
             "files_scanned": files_scanned, "refs_found": bool(hits),
-            "truncated": truncated, "hits": hits}
+            "truncated": truncated, "hits": hits,
+            "roles_subscriptions": extra}
 
 
 def main(argv=None) -> int:
