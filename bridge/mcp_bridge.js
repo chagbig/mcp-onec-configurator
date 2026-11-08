@@ -967,17 +967,55 @@ OPS.tree_nav = function (a) {
     return { sent: keys.length };
 };
 // Выделить узел группы подчинённых вида kind (activateInTreeEx с GUID класса подчинённых).
+// Смоук v1.2.3 (чистая машина, отчёт 08.11): падала «Объект не поддерживает это
+// свойство или метод» — воспроизводится и на 1.6.43, и на 3.0.66. Диагностика
+// (md_class_probe): у дескриптора подчинённого класса нет .id, activateInTreeEx
+// может отсутствовать. Падение больше не роняет операцию: выделяем сам объект
+// и честно сообщаем, что именно не поддержал хост.
 OPS.tree_activate_group = function (a) {
     var obj = resolve(a);
-    var mdc = obj.mdclass, guid = null, names = [];
+    var mdc = obj.mdclass, guid = null, names = [], unsupported = null;
     for (var i = 0; i < mdc.childsClassesCount; i++) {
-        var cc = mdc.childClassAt(i), nm = String(cc.name(1, true));
+        var cc = mdc.childClassAt(i), nm = null;
+        try { nm = String(cc.name(1, true)); }
+        catch (eN) { unsupported = "childClassAt(" + i + ").name: " + errStr(eN); continue; }
         names.push(nm);
-        if (nm.toLowerCase() == String(a.kind).toLowerCase()) guid = String(cc.id);
+        if (nm.toLowerCase() == String(a.kind).toLowerCase()) {
+            try { guid = String(cc.id); }
+            catch (eG) { unsupported = "childClass.id: " + errStr(eG); }
+            break;
+        }
     }
-    if (!guid) throw new Error("у класса нет подчинённых вида " + a.kind + "; есть: " + names.join(", "));
-    var ok = obj.activateInTreeEx(guid);
-    return { obj: objInfo(obj), kind: a.kind, classGuid: guid, ok: ok };
+    if (!guid) {
+        if (unsupported) throw new Error(unsupported + " (фоллбек невозможен)");
+        throw new Error("у класса нет подчинённых вида " + a.kind + "; есть: " + names.join(", "));
+    }
+    try {
+        var ok = obj.activateInTreeEx(guid);
+        return { obj: objInfo(obj), kind: a.kind, classGuid: guid, ok: ok };
+    } catch (eA) {
+        // фоллбек: выделить сам объект — навигация к группе не удалась
+        try { obj.activateInTree(); } catch (eF) {}
+        return { obj: objInfo(obj), kind: a.kind, classGuid: guid, ok: false,
+            groupActivated: false, reason: "activateInTreeEx: " + errStr(eA) };
+    }
+};
+
+// Диагностика возможностей mdclass/mdobject хоста: что поддерживают
+// дескрипторы подчинённых классов и методы активации (этап 21, смоук v1.2.3).
+OPS.md_class_probe = function (a) {
+    var obj = resolve(a);
+    var mdc = obj.mdclass, out = [];
+    for (var i = 0; i < mdc.childsClassesCount; i++) {
+        var cc = mdc.childClassAt(i), rec = { i: i };
+        try { rec.name = String(cc.name(1, true)); } catch (e) { rec.nameErr = errStr(e); }
+        try { rec.id = String(cc.id); } catch (e) { rec.idErr = errStr(e); }
+        out.push(rec);
+    }
+    var act = null, ext = null;
+    try { act = typeof obj.activateInTree; } catch (e) { act = "err: " + errStr(e); }
+    try { ext = typeof obj.activateInTreeEx; } catch (e) { ext = "err: " + errStr(e); }
+    return { obj: objInfo(obj), childs: out, activateInTree: act, activateInTreeEx: ext };
 };
 
 var addCapture = null;

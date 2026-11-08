@@ -107,6 +107,30 @@ if (-not $SkipSnegopat) {
     }
 } else { Step "Снегопат пропущен (-SkipSnegopat)" }
 
+# ---------- 2b. Синхронизация моста во ВСЕ установленные версии ----------
+# Смоук v1.2.3 (чистая машина, отчёт mcp-configurator-v1.2.3-smoke-all-tools):
+# при -SkipSnegopat рабочий аддин snegopat\<вер>\...\addins\mcp\mcp_bridge.js
+# НЕ обновлялся — сессии оставались на старом мосту (голое «Error» вместо
+# текстов ошибок v1.2.3). Выполняется ВСЕГДА (и после установки новой версии —
+# идемпотентно): перекладываем мост из поставки в каждую найденную версию.
+Step "Синхронизация моста в установленные версии Снегопата"
+$Synced = 0
+Get-ChildItem (Join-Path $HomeDir "snegopat") -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+    $SyncDir = Join-Path $_.FullName "x64\modules\snegopat\addins\mcp"
+    if (Test-Path $SyncDir) {
+        try {
+            Copy-Item $BridgeSrc (Join-Path $SyncDir "mcp_bridge.js") -Force
+            Write-Host "    мост обновлён: $($_.Name)"
+            $Synced++
+        } catch {
+            Fail ("не удалось обновить мост в {0}: {1} (конфигураторы закрыты?)" -f $_.Name, $_.Exception.Message)
+        }
+    }
+}
+if ($Synced -eq 0) {
+    Write-Host "    версий с аддином не найдено (мост ставится шагом «Снегопат из zip»)"
+}
+
 # ---------- 3. Дом: каталоги моста, маркер, флаг, конфиг ----------
 Step "Дом: $HomeDir"
 foreach ($d in "mcp\sessions", "mcp\journal", "mcp\forms", "backups", "bin", "verify", "temp") {
