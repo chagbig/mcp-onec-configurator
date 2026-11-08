@@ -115,15 +115,20 @@ if (-not $SkipSnegopat) {
 # идемпотентно): перекладываем мост из поставки в каждую найденную версию.
 Step "Синхронизация моста в установленные версии Снегопата"
 $Synced = 0
+$SyncTargets = @()
 Get-ChildItem (Join-Path $HomeDir "snegopat") -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-    $SyncDir = Join-Path $_.FullName "x64\modules\snegopat\addins\mcp"
-    if (Test-Path $SyncDir) {
+    $SyncTargets += @{ Name = $_.Name; Dir = (Join-Path $_.FullName "x64\modules\snegopat\addins\mcp") }
+}
+# легаси-раскладка v1.1.x: мост прямо в <дом>\x64\...
+$SyncTargets += @{ Name = "x64 (легаси)"; Dir = (Join-Path $HomeDir "x64\modules\snegopat\addins\mcp") }
+foreach ($t in $SyncTargets) {
+    if (Test-Path $t.Dir) {
         try {
-            Copy-Item $BridgeSrc (Join-Path $SyncDir "mcp_bridge.js") -Force
-            Write-Host "    мост обновлён: $($_.Name)"
+            Copy-Item $BridgeSrc (Join-Path $t.Dir "mcp_bridge.js") -Force
+            Write-Host "    мост обновлён: $($t.Name)"
             $Synced++
         } catch {
-            Fail ("не удалось обновить мост в {0}: {1} (конфигураторы закрыты?)" -f $_.Name, $_.Exception.Message)
+            Fail ("не удалось обновить мост в {0}: {1} (конфигураторы закрыты?)" -f $t.Name, $_.Exception.Message)
         }
     }
 }
@@ -172,7 +177,7 @@ if (Test-Path $DwxSrcPkg) {
 } else {
     Fail "dynwrapx.dll не найден ни в пакете ($DwxSrcPkg), ни в $DwxSrcHome"
 }
-regsvr32 /i $Dwx | Out-Null
+regsvr32 /s /i $Dwx | Out-Null
 if ($LASTEXITCODE -ne 0) { Fail "regsvr32 /i dynwrapx.dll: код $LASTEXITCODE" }
 Write-Host "    зарегистрирован per-user (HKCU): $Dwx"
 
@@ -217,3 +222,6 @@ Write-Host "4. Разные версии Снегопата: повторите 
 Write-Host "   версии живут параллельно в $HomeDir\snegopat\<версия>\."
 Write-Host "5. Проверка: list_sessions в ZCode при открытом конфигураторе."
 Write-Host "Подробности: РУКОВОДСТВО-АДМИНИСТРАТОРА.md и РУКОВОДСТВО-ПОЛЬЗОВАТЕЛЯ.md."
+# успех — явный код: последний robocopy возвращает 1 («файлы скопированы») и
+# без этого утекал в exit-код установщика (найдено на прогоне v1.2.4)
+exit 0
