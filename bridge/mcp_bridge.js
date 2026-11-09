@@ -350,6 +350,109 @@ OPS.send_cfg_cmd = function (a) {
     return { sent: sent, num: num, group: grp };
 };
 
+// ---------- отладчик (группа CDebug, проба «точки остановки через snegopat», 09.11) ----------
+// Полный набор команд отладчика живёт в stdcommands.CDebug (см. debugHelpers.js —
+// стоковый аддин так и шлёт Brkpt/BrkptDel/BreakOnError). Точка останова ставится
+// в позиции курсора АКТИВНОГО редактора модуля. Инвариант «нет code execution»:
+// явный белый список номеров, до/после — состояние команды (checked у Brkpt
+// отражает точку на текущей строке).
+var DEBUG_GROUP = "{DE680E96-5826-4E22-834D-692E307A1D9C}";
+var DEBUG_CMDS = {
+    OpenModule: { group: FRNT_GROUP, num: 11 },        // модуль объекта из дерева
+    Brkpt: { group: DEBUG_GROUP, num: 11 },            // точка останова (курсор)
+    BrkptCond: { group: DEBUG_GROUP, num: 12 },        // точка с условием (диалог)
+    BrkptOff: { group: DEBUG_GROUP, num: 13 },         // отключить точку
+    BrkptDel: { group: DEBUG_GROUP, num: 14 },         // убрать все точки
+    BrkptOffAll: { group: DEBUG_GROUP, num: 15 },      // отключить все точки
+    BrkptList: { group: DEBUG_GROUP, num: 16 },        // список точек (диалог, только проба)
+    BreakOnError: { group: DEBUG_GROUP, num: 21 },     // остановка при ошибке (диалог)
+    GoToSource: { group: DEBUG_GROUP, num: 22 }        // переход к строке с точкой
+};
+OPS.send_debug_cmd = function (a) {
+    var pc = DEBUG_CMDS[String(a.cmd || "")];
+    if (!pc) {
+        var names = [];
+        for (var n in DEBUG_CMDS) names.push(n);
+        throw new Error("cmd вне белого списка (" + names.join(", ") + "): " + a.cmd);
+    }
+    // ГАРД КОНТЕКСТА (первый прогон 09.11: Brkpt при фокусе на дереве заблокировал
+    // тик моста нативным ожиданием — состояние было только taskkill'ом): команды,
+    // зависящие от позиции курсора, исполняются ТОЛЬКО при активном редакторе модуля.
+    var cursorDependent = { Brkpt: 1, BrkptCond: 1, BrkptOff: 1, GoToSource: 1 };
+    var av = null;
+    try { av = windows.getActiveView(); } catch (eA) {}
+    var avTitle = av ? safeStr(av.title) : "";
+    if (cursorDependent[String(a.cmd)] && (!av || avTitle.indexOf("Модуль") < 0))
+        throw new Error("активный вид не редактор модуля (title=" + avTitle
+            + "); откройте модуль (send_debug_cmd cmd=OpenModule) и повторите");
+    var st = getCmdState(pc.group, pc.num);
+    if (!st || !st.enabled)
+        throw new Error("команда недоступна: " + a.cmd + (st ? ""
+            + " (состояние disabled)" : " (нет состояния — контекст: дерево/редактор/отладка)"));
+    var before = { enabled: st.enabled, checked: st.checked };
+    var sent = sendCommand(pc.group, pc.num);
+    var st2 = getCmdState(pc.group, pc.num);
+    var after = st2 ? { enabled: st2.enabled, checked: st2.checked } : null;
+    return { sent: sent, cmd: a.cmd, num: pc.num, group: pc.group, view: avTitle,
+        before: before, after: after };
+};
+
+// Переключить точку останова НАДЁЖНЫМ путём: F9 через PostMessage (ОЧЕРЕДЬ
+// сообщений — акселератор редактора отработает в главном цикле, тик моста не
+// блокируется). Уроки 09.11: (1) sendCommand(CDebug.Brkpt) из тика БЛОКИРУЕТ
+// тик нативным ожиданием без pump (cpu 0, модалки нет, только taskkill);
+// (2) SendMessage WM_KEYDOWN идёт мимо таблицы акселераторов — F9 не
+// срабатывает (scintilla сам горячие клавиши не разруливает). PostMessageW
+// берём из DynamicWrapperX (в snegopat winapi.js не зарегистрирован).
+var _dwxPost = null;
+function postMessageW(hwnd, msg, wp, lp) {
+    if (!_dwxPost) {
+        var dwx = new ActiveXObject("DynamicWrapperX");
+        dwx.Register("USER32.DLL", "PostMessageW", "i=hlll", "r=l");
+        _dwxPost = dwx;
+    }
+    return _dwxPost.PostMessageW(hwnd, msg, wp, lp);
+}
+OPS.editor_brkpt_toggle = function (a) {
+    var hwnd = winApi.getFocus();
+    if (!hwnd) hwnd = ensureInputFocus();
+    if (!hwnd) throw new Error("нет фокуса ввода: активируйте окно конфигуратора");
+    var av = null;
+    try { av = windows.getActiveView(); } catch (eA) {}
+    var avTitle = av ? safeStr(av.title) : "";
+    if (avTitle.indexOf("Модуль") < 0)
+        throw new Error("активный вид не редактор модуля (title=" + avTitle + ")");
+    // опционально подвину курсор: down/line — клавиши стрелок/Home INLINE в
+    // scintilla (SendMessage), это безопасно: тик не блокируется
+    var moved = 0;
+    var downs = a.down ? Number(a.down) : 0;
+    if (downs > 0 && downs <= 1000) {
+        for (var d = 0; d < downs; d++) {
+            winApi.sendMessage(hwnd, 0x100, 0x28, 0x01000001); // WM_KEYDOWN VK_DOWN
+            winApi.sendMessage(hwnd, 0x101, 0x28, 0xC1000001); // WM_KEYUP
+            moved++;
+        }
+    }
+    var VK_F9 = 0x78;
+    postMessageW(hwnd, 0x100, VK_F9, 0x00430001); // WM_KEYDOWN, scancode F9=0x43
+    postMessageW(hwnd, 0x101, VK_F9, 0xC0430001); // WM_KEYUP
+    // состояние ТОЛЬКО как до-состояние: F9 обработается следующим тиком
+    var st = null;
+    try { st = getCmdState(DEBUG_GROUP, 11); } catch (e) {}
+    return { view: avTitle, posted: true, movedDown: moved,
+        brkptStateBefore: st ? { enabled: st.enabled, checked: st.checked } : null };
+};
+
+// Состояние точки останова на текущей строке без переключения.
+OPS.editor_brkpt_state = function (a) {
+    var st = null;
+    try { st = getCmdState(DEBUG_GROUP, 11); } catch (e) {}
+    var av = null;
+    try { av = windows.getActiveView(); } catch (eA) {}
+    return { view: av ? safeStr(av.title) : null,
+        brkptState: st ? { enabled: st.enabled, checked: st.checked } : null };
+};
+
 OPS.session_info = function (a) {
     return { pid: myPid, conn: sessionBase.conn, platform: sessionBase.platform,
         bridge: BRIDGE_VERSION, modalMode: windows.modalMode, running: running,
@@ -1354,7 +1457,8 @@ OPS.syntax_check = function (a) {
 // перечислить контролы, закрыть Отменой. Ничего не выполняет.
 var PROBE_CMDS = {
     cfgstore: { group: STG_GROUP, nums: [150, 151, 152, 153] },
-    config: { group: CFG_GROUP, nums: [9, 29] }
+    config: { group: CFG_GROUP, nums: [9, 29] },
+    debug: { group: DEBUG_GROUP, nums: [16, 21] }   // список точек останова, остановка при ошибке
 };
 var probeCapture = null;
 function onProbeModal(d) {
