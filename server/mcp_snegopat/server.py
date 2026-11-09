@@ -1005,6 +1005,62 @@ class Toolkit:
         except EventLogError as e:
             raise BridgeError("eventlog_failed", str(e))
 
+    def md_search_code(self, query: str, cf_path: str, regex: bool = False,
+                       limit: int = 50) -> dict:
+        """Поиск по текстам модулей конфигурации в cf — БЕЗ платформы (IDEAS №15).
+        Тексты модулей читаются из .0-сериализаций cf (страницы text), uuid записи
+        = uuid объекта, имя из сериализаций. Поиск по СОХРАНЁННОЙ конфигурации:
+        cf_path — файл от cfg_archive_cf (пишет последнее сохранённое состояние —
+        несохранённые правки module_set в cf не попадают). query — подстрока
+        (регистронезависимо) или regex при regex=true; попадания только внутри
+        страниц text (модульный текст), вне их — отбрасываются. Возвращает
+        совпадения по объектам: {object, hits: [{line, col, fragment}]}. Популярный
+        сценарий: cfg_archive_cf → md_search_code(query, cf_path) — «где вызывается
+        Процедура X» по всей конфигурации за секунды."""
+        import sys as _sys
+        sys_tools = Path(__file__).resolve().parents[1] / "tools"
+        if str(sys_tools) not in _sys.path:
+            _sys.path.insert(0, str(sys_tools))
+        from md_search_code import search  # noqa: E402
+        if not query:
+            raise BridgeError("bad_args", "query обязателен (подстрока или regex)")
+        if not cf_path:
+            raise BridgeError("bad_args",
+                              "cf_path обязателен: файл от cfg_archive_cf "
+                              "(сначала сохраните конфигурацию — поиск по сохранённой)")
+        try:
+            return search(cf_path, query, bool(regex), int(limit))
+        except (ValueError, FileNotFoundError) as e:
+            raise BridgeError("bad_args", str(e))
+
+    def module_structure(self, session: int, container: int, path: str,
+                         prop: str = "МодульОбъекта",
+                         calls_of: str = "") -> dict:
+        """Структура модуля (IDEAS №16): процедуры/функции с line_start/line_end,
+        директивами (&НаСервере…) и Экспорт — для ТОЧНЫХ module_patch (правка по
+        номерам строк). Дополнительно calls_of=«Имя» — вызовы процедуры в этом же
+        модуле (MVP иерархии вызовов). Модуль берётся живым module_get(with_text);
+        текст НЕ сохраняется. Парсер — tools/module_structure.py (эвристика
+        начала строки «Процедура|Функция» + «(»; ограничения в docstring)."""
+        import sys as _sys
+        sys_tools = Path(__file__).resolve().parents[1] / "tools"
+        if str(sys_tools) not in _sys.path:
+            _sys.path.insert(0, str(sys_tools))
+        from module_structure import parse, find_call_sites  # noqa: E402
+        if not path:
+            raise BridgeError("bad_args", "path обязателен (например «Справочник.Эмитенты»)")
+        mod = self._call(session, "module_get",
+                         self._a(container, path=path, prop=prop, withText=True))
+        text = mod.get("text") or ""
+        blocks = parse(text)
+        res: dict = {"module": {"path": path, "prop": prop,
+                                "lines": len(text.splitlines()),
+                                "readonly": mod.get("readonly")},
+                     "blocks": blocks}
+        if calls_of:
+            res["calls"] = find_call_sites(text, calls_of)
+        return res
+
     def ext_save(self, session: int, name: str) -> dict:
         """Сохранить расширение (штатное «Сохранить документ» при активном дереве
         расширения — Frame.FileSave). Проверено живьём (28.10.2026): isModified → False,
@@ -1268,6 +1324,7 @@ _TOOLS = [
     "ext_list", "ext_dump_cfe", "ext_save", "ext_create", "ext_open",
     "ext_build_from_cf", "md_check_refs", "md_journal", "journal_configure", "doctor",
     "eventlog",
+    "md_search_code", "module_structure",
     "tree_activate", "tree_activate_group", "dialog_probe",
     "bridge_wait", "bridge_stats", "focus_probe",
 ]

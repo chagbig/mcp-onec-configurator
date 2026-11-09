@@ -397,13 +397,34 @@ OPS.send_debug_cmd = function (a) {
         before: before, after: after };
 };
 
+// Активное текстовое окно (редактор модуля/текста) — snegopat.activeTextWindow();
+// методы ITextWindow getCaretPos/setCaretPos/setSelection обкатаны в стоковых
+// аддинах (BookMarkers.js, textEditorExt.js, git_blame.js).
+function activeTextWindowOrThrow() {
+    var tw = null;
+    try { tw = snegopat.activeTextWindow(); } catch (e) { tw = null; }
+    if (!tw) throw new Error("активное окно не текстовый редактор (откройте модуль: send_debug_cmd cmd=OpenModule)");
+    return tw;
+}
+
+// Курсор редактора: чтение/установка (строка, колонка с 1).
+OPS.editor_caret = function (a) {
+    var tw = activeTextWindowOrThrow();
+    if (a.line !== undefined || a.col !== undefined) {
+        tw.setCaretPos(Number(a.line || 1), Number(a.col || 1));
+    }
+    var pos = tw.getCaretPos();
+    return { caret: { row: pos.beginRow, col: pos.beginCol } };
+};
+
 // Переключить точку останова НАДЁЖНЫМ путём: F9 через PostMessage (ОЧЕРЕДЬ
 // сообщений — акселератор редактора отработает в главном цикле, тик моста не
 // блокируется). Уроки 09.11: (1) sendCommand(CDebug.Brkpt) из тика БЛОКИРУЕТ
 // тик нативным ожиданием без pump (cpu 0, модалки нет, только taskkill);
 // (2) SendMessage WM_KEYDOWN идёт мимо таблицы акселераторов — F9 не
-// срабатывает (scintilla сам горячие клавиши не разруливает). PostMessageW
-// берём из DynamicWrapperX (в snegopat winapi.js не зарегистрирован).
+// срабатывает; (3) стрелки SendMessage каретку редактора не ведут (маркер
+// встал на пустую строку EOF) — позиционирование только setCaretPos.
+// PostMessageW берём из DynamicWrapperX (в snegopat winapi.js не зарегистрирован).
 var _dwxPost = null;
 function postMessageW(hwnd, msg, wp, lp) {
     if (!_dwxPost) {
@@ -414,32 +435,20 @@ function postMessageW(hwnd, msg, wp, lp) {
     return _dwxPost.PostMessageW(hwnd, msg, wp, lp);
 }
 OPS.editor_brkpt_toggle = function (a) {
-    var hwnd = winApi.getFocus();
-    if (!hwnd) hwnd = ensureInputFocus();
-    if (!hwnd) throw new Error("нет фокуса ввода: активируйте окно конфигуратора");
-    var av = null;
-    try { av = windows.getActiveView(); } catch (eA) {}
-    var avTitle = av ? safeStr(av.title) : "";
-    if (avTitle.indexOf("Модуль") < 0)
-        throw new Error("активный вид не редактор модуля (title=" + avTitle + ")");
-    // опционально подвину курсор: down/line — клавиши стрелок/Home INLINE в
-    // scintilla (SendMessage), это безопасно: тик не блокируется
-    var moved = 0;
-    var downs = a.down ? Number(a.down) : 0;
-    if (downs > 0 && downs <= 1000) {
-        for (var d = 0; d < downs; d++) {
-            winApi.sendMessage(hwnd, 0x100, 0x28, 0x01000001); // WM_KEYDOWN VK_DOWN
-            winApi.sendMessage(hwnd, 0x101, 0x28, 0xC1000001); // WM_KEYUP
-            moved++;
-        }
-    }
+    var tw = activeTextWindowOrThrow();
+    if (a.line !== undefined) tw.setCaretPos(Number(a.line), 1);
+    var pos = tw.getCaretPos();
+    var hwnd = null;
+    try { hwnd = tw.GetHwnd ? tw.GetHwnd() : null; } catch (eH) {}
+    if (!hwnd) { hwnd = winApi.getFocus(); }
+    if (!hwnd) throw new Error("нет hwnd текстового окна");
     var VK_F9 = 0x78;
     postMessageW(hwnd, 0x100, VK_F9, 0x00430001); // WM_KEYDOWN, scancode F9=0x43
     postMessageW(hwnd, 0x101, VK_F9, 0xC0430001); // WM_KEYUP
     // состояние ТОЛЬКО как до-состояние: F9 обработается следующим тиком
     var st = null;
     try { st = getCmdState(DEBUG_GROUP, 11); } catch (e) {}
-    return { view: avTitle, posted: true, movedDown: moved,
+    return { posted: true, caret: { row: pos.beginRow, col: pos.beginCol },
         brkptStateBefore: st ? { enabled: st.enabled, checked: st.checked } : null };
 };
 
