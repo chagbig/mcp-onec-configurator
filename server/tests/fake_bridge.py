@@ -27,6 +27,8 @@ class FakeBridge:
         self.pid = pid
         self.modules: dict[tuple[str, str], str] = {}  # (path, prop) -> text
         self.objects: dict[str, dict] = {}              # path -> md_object-подобный ответ
+        self.children: dict[tuple[str, str], list] = {}  # (path, kind) -> [{name, id}]
+        self.type_sets: list[dict] = []                 # вызовы prop_set_type(_internal)
         self.active_title = "Конфигурация — Демо"
         self.focus_fail_times = 0
         self.platform = "8.3.27.2074"
@@ -151,7 +153,18 @@ class FakeBridge:
         return {"mask": a.get("mask"), "matches": [], "truncated": False}
 
     def op_md_children(self, a: dict) -> dict:
-        return {"kind": a.get("kind"), "count": 0, "items": []}
+        items = self.children.get((a.get("path") or "", a.get("kind") or ""), [])
+        return {"kind": a.get("kind"), "count": len(items), "items": items}
+
+    def op_prop_set_type(self, a: dict) -> dict:
+        self.type_sets.append({"path": a.get("path"), "type": a.get("type"),
+                               "internal": None})
+        return {"before": None, "set": True, "after": a.get("type")}
+
+    def op_prop_set_type_internal(self, a: dict) -> dict:
+        self.type_sets.append({"path": a.get("path"), "type": None,
+                               "internal": a.get("internal")})
+        return {"before": None, "set": True, "after": a.get("internal")}
 
     def op_module_get(self, a: dict) -> dict:
         key = (a.get("path") or "", a.get("prop") or "Модуль")
@@ -212,6 +225,9 @@ class FakeBridge:
 
     def op_prop_set(self, a: dict) -> dict:
         return {"setResult": True, "before": a.get("expected"), "after": a.get("value")}
+
+    def op_prop_set_internal(self, a: dict) -> dict:
+        return {"before": '{"U"}', "set": True, "after": a.get("internal")}
 
     def op_update_db_cfg(self, a: dict) -> dict:
         if not a.get("own_bases"):

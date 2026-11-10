@@ -49,6 +49,90 @@ def _xml_sha(p: Path) -> str:
     return hashlib.sha1(p.read_bytes()).hexdigest()
 
 
+def _file_sha(p: Path) -> str:
+    h = hashlib.sha1()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 22), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _uuid_name_map(cf_path: str) -> dict:
+    """{uuid_lower: голое имя} из сериализаций «{1,0,<uuid>},"Имя",» (все записи)."""
+    from cf_inspect import CfFile  # noqa: E402
+    names = {}
+    with CfFile(cf_path) as cf:
+        for r in cf.records():
+            data = cf.read(r)
+            if not data:
+                continue
+            text = data[:8192].decode("utf-8", errors="ignore")
+            for m in re.finditer(r'\{1,0,([0-9a-f\-]{36})\},"([^"]+)",', text):
+                names.setdefault(m.group(1).lower(), m.group(2))
+    return names
+
+
+def _candidate_names(recdiff_res: dict, map1: dict, map2: dict) -> tuple:
+    """(голые имена объектов-кандидатов, пропущенные записи) для -listFile.
+    Имя берём из карты СВОЕЙ стороны: new — cf2, deleted — cf1, changed — любая.
+    Записи без имени (миграции/служебные) пропускаются с пометкой."""
+    named, skipped = [], []
+    seen = set()
+    for group in ("new", "deleted", "changed"):
+        for rec in recdiff_res.get(group, []):
+            uuid = rec.split(".")[0].lower()
+            if uuid in seen:
+                continue
+            seen.add(uuid)
+            nm = map2.get(uuid) or map1.get(uuid)
+            if nm:
+                named.append(nm)
+            else:
+                skipped.append(rec)
+    return sorted(set(named)), skipped
+
+
+def _slot_for(cf_path: str, work: Path, tag: str) -> str:
+    """Слот для cf с РЕУСОМ по маркеру sha1 источника (2 ГБ слот — ~5-10 мин)."""
+    slot = work / ("slot-" + tag)
+    marker = work / (f"slot-{tag}.origin.json")
+    cf = Path(cf_path)
+    sha = _file_sha(cf)
+    if marker.is_file() and (slot / "1Cv8.1CD").is_file():
+        try:
+            if json.loads(marker.read_text(encoding="utf-8")).get("sha1") == sha:
+                print(f"слот {tag}: переиспользован", flush=True)
+                return str(slot)
+        except Exception:
+            pass
+    r = subprocess.run([sys.executable, str(TOOLS / "mockup_init.py"),
+                        "--base", str(slot), "--from", cf_path, "--reset"],
+                       capture_output=True, text=True, timeout=7200)
+    if r.returncode != 0:
+        raise RuntimeError(f"mockup_init {tag}: {r.stdout[-200:]} {r.stderr[-200:]}")
+    marker.write_text(json.dumps({"sha1": sha, "size": cf.stat().st_size}),
+                      encoding="utf-8")
+    print(f"слот {tag}: создан", flush=True)
+    return str(slot)
+
+
+def _partial_xml_dump(base: str, out: Path, names: list, timeout: int = 3600) -> None:
+    """Точечная выгрузка кандидатов: /DumpConfigToFiles <dir> -listFile <имена>."""
+    out.mkdir(parents=True, exist_ok=True)
+    list_file = out.parent / (out.name + "-list.txt")
+    list_file.write_text("\n".join(names) + "\n", encoding="utf-8")
+    res_file, log_file = out.parent / (out.name + ".res"), out.parent / (out.name + ".log")
+    res_file.unlink(missing_ok=True)
+    r = subprocess.run([PLATFORM, "DESIGNER", "/DisableStartupDialogs",
+                        "/F", str(base), "/DumpConfigToFiles", str(out),
+                        "-listFile", str(list_file),
+                        "/Out", str(log_file), "/DumpResult", str(res_file)],
+                       capture_output=True, timeout=timeout)
+    res = res_file.read_text(encoding="utf-8-sig", errors="replace").strip()         if res_file.is_file() else ""
+    if r.returncode != 0 or res not in ("0", ""):
+        raise RuntimeError(f"partial DumpConfigToFiles {out}: rc={r.returncode}, res={res!r}")
+
+
 def _full_xml_dump(base: str, out: Path, timeout: int = 3600) -> None:
     """Полная XML-выгрузка конфигурации слота (каноничный снимок платформы)."""
     out.mkdir(parents=True, exist_ok=True)
@@ -158,8 +242,55 @@ def run(cf1: str, cf2: str, work_dir: str) -> dict:
     _full_xml_dump(slots["cf2"], d2)
     print("выгрузка cf2:", round(time.time() - t0, 1), "с", flush=True)
     fd = compare_dumps(d1, d2)
-    report = {"cf1": cf1, "cf2": cf2, "full_diff": fd,
+    report = {"cf1": cf1, "cf2": cf2, "mode": "full-canon", "full_diff": fd,
               "verdicts": classify(fd),
+              "ms": round((time.time() - t0) * 1000)}
+    (work / "diff.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    return report
+
+
+def _dump_cached(base: str, out: Path, work: Path, tag: str, cf_path: str) -> None:
+    """Полная XML-выгрузка с РЕУСОМ по маркеру sha1 cf (25-40 мин на 2 ГБ —
+    кэшируется навсегда, cf неизменен → выгрузка валидна)."""
+    marker = work / (f"dump-{tag}.origin.json")
+    sha = _file_sha(Path(cf_path))
+    if marker.is_file() and out.is_dir() and any(out.iterdir()):
+        try:
+            if json.loads(marker.read_text(encoding="utf-8")).get("sha1") == sha:
+                print(f"выгрузка {tag}: переиспользована (кэш)", flush=True)
+                return
+        except Exception:
+            pass
+    _full_xml_dump(base, out)
+    marker.write_text(json.dumps({"sha1": sha}), encoding="utf-8")
+    print(f"выгрузка {tag}: создана (кэширована)", flush=True)
+
+
+def run_hybrid(cf1: str, cf2: str, work_dir: str) -> dict:
+    """Гибридный конвейер (ред. 4, v1.3): слоты и ВЫГРУЗКИ кэшируются по sha1 cf →
+    повторные diff той же пары — минуты (первый — цена ред. 3); cf_recdiff-кандидаты
+    идут в отчёт (быстрый триаж + сверка с каноном).
+
+    ИССЛЕДОВАНО 11.11 и отклонено: точечные -listFile выгрузки по голым именам —
+    платформа требует ПОЛНЫЕ имена (Вид.Имя; bare/uuid/«Конфигурация» = «не является
+    именем объекта метаданных»), а резолвер uuid→Вид из cf не построен: Configuration-
+    запись — плоские списки uuid без kind-структуры, class-гиды пер-конфигурационные
+    и двусмысленны (две пробы дали разные таблицы). Открытая проблема — идея в реестр."""
+    from cf_recdiff import scan  # noqa: E402
+    work = Path(work_dir)
+    work.mkdir(parents=True, exist_ok=True)
+    t0 = time.time()
+    slots = {tag: _slot_for(cf, work, tag) for tag, cf in (("cf1", cf1), ("cf2", cf2))}
+    d1, d2 = work / "full-cf1", work / "full-cf2"
+    _dump_cached(slots["cf1"], d1, work, "cf1", cf1)
+    _dump_cached(slots["cf2"], d2, work, "cf2", cf2)
+    fd = compare_dumps(d1, d2)
+    print("слой 1: записный скан (cf_recdiff) — кандидаты в отчёт...", flush=True)
+    rec = scan(cf1, cf2)
+    report = {"cf1": cf1, "cf2": cf2, "mode": "hybrid-cached", "full_diff": fd,
+              "verdicts": classify(fd),
+              "recdiff": {k: rec[k] for k in ("new", "deleted", "changed")},
               "ms": round((time.time() - t0) * 1000)}
     (work / "diff.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -168,13 +299,21 @@ def run(cf1: str, cf2: str, work_dir: str) -> dict:
 
 def main(argv=None) -> int:
     import argparse
-    ap = argparse.ArgumentParser(description="cf_diff: сравнение двух cf (этап 14, ред. 3)")
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if stream.encoding and stream.encoding.lower().replace("-", "") != "utf8":
+                stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+    ap = argparse.ArgumentParser(description="cf_diff: сравнение двух cf (ред. 4: гибрид v1.3)")
     ap.add_argument("cf1", help="вендорский эталон")
     ap.add_argument("cf2", help="доработанная конфигурация")
     ap.add_argument("--work", default=r"Y:\Snegopat-mcperify\cf_diff")
+    ap.add_argument("--full-canon", action="store_true",
+                    help="ред. 3: полные XML-выгрузки (медленно, эталон точности)")
     ap.add_argument("--report", help="файл diff.json (по умолчанию work/diff.json)")
     a = ap.parse_args(argv)
-    rep = run(a.cf1, a.cf2, a.work)
+    rep = (run if a.full_canon else run_hybrid)(a.cf1, a.cf2, a.work)
     fd = rep["full_diff"]
     print("изменённых файлов:", len(fd["changed"]),
           "| новых:", len(fd["only2"]), "| удалённых:", len(fd["only1"]))

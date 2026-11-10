@@ -220,6 +220,91 @@ class TestModules(Base):
         self.assertEqual(self.fake.modules[(self.P, "Модуль")], self.TEXT)
 
 
+class TestMdClone(Base):
+    """№18: клон объекта — реквизиты с типами, ТЧ, модули; формы не копируются."""
+
+    def _setup_source(self) -> None:
+        self.fake.objects["Справочник.Источник"] = {
+            "name": "Источник", "id": "src1", "cls": "Справочник",
+            "synonymRu": "Источник данных",
+            "props": [{"name": "Имя", "value": "Источник"}],
+            "modules": [{"prop": "МодульОбъекта", "hash": "aa", "lines": 2}],
+        }
+        self.fake.children[("Справочник.Источник", "Реквизиты")] = [
+            {"name": "Простой", "id": "a1"}, {"name": "Ссылочный", "id": "a2"}]
+        self.fake.children[("Справочник.Источник", "ТабличныеЧасти")] = [
+            {"name": "Строки", "id": "t1"}]
+        self.fake.children[("Справочник.Источник.ТабличнаяЧасть.Строки", "Реквизиты")] = [
+            {"name": "КоличествоТЧ", "id": "t1a"}]
+        self.fake.objects["Справочник.Источник.Реквизит.Простой"] = {
+            "name": "Простой", "id": "a1", "cls": "Реквизит",
+            "props": [{"name": "Тип", "value": {"types": ["Строка"], "length": 50}}]}
+        self.fake.objects["Справочник.Источник.Реквизит.Ссылочный"] = {
+            "name": "Ссылочный", "id": "a2", "cls": "Реквизит",
+            "props": [{"name": "Тип", "value": {"internal": '{"#",f5c65050}'}}]}
+        self.fake.objects["Справочник.Источник.ТабличнаяЧасть.Строки.Реквизит.КоличествоТЧ"] = {
+            "name": "КоличествоТЧ", "id": "t1a", "cls": "Реквизит",
+            "props": [{"name": "Тип", "value": {"types": ["Число"], "digits": 15,
+                                                 "fraction": 3}}]}
+        self.fake.modules[("Справочник.Источник", "МодульОбъекта")] = "Сообщить(1);\r\n"
+        self.fake.modules[("Справочник.Клон", "МодульОбъекта")] = ""
+
+    def test_clone_composes_children_and_types(self) -> None:
+        self._setup_source()
+        # md_add_child верифицирует владельца (md_object) — созданный клон должен
+        # существовать для фейка к моменту копирования реквизитов
+        orig_call = self.tk.bridge.call
+
+        def call(pid, op, args=None, timeout=None):
+            if op == "md_add_child":
+                a = args or {}
+                if a.get("newName") == "Клон":
+                    self.fake.objects["Справочник.Клон"] = {
+                        "name": "Клон", "id": "clone1", "cls": "Справочник",
+                        "props": [], "modules": []}
+                if a.get("newName") == "Строки" and a.get("ownerPath") == "Справочник.Клон":
+                    self.fake.objects["Справочник.Клон.ТабличнаяЧасть.Строки"] = {
+                        "name": "Строки", "id": "clone-t1", "cls": "ТабличнаяЧасть",
+                        "props": [], "modules": []}
+            return orig_call(pid, op, args, timeout=timeout)
+
+        self.tk.bridge.call = call
+        try:
+            res = self.tk.md_clone(path="Справочник.Источник", new_name="Клон")
+        finally:
+            self.tk.bridge.call = orig_call
+        self.assertEqual(res["cloned"]["path"], "Справочник.Клон")
+        self.assertEqual(res["copied"]["attributes"], 2)
+        self.assertEqual(res["copied"]["tabular_parts"], 1)
+        self.assertEqual(res["copied"]["tch_attrs_skipped"], 1)
+        self.assertIn("tch-first-attr-xml", res["copied"]["note"])
+        adds = [a for op, a in self.fake.args_seen if op == "md_add_child"]
+        names = [a["newName"] for a in adds]
+        self.assertEqual(names, ["Клон", "Простой", "Ссылочный", "Строки"])
+        # типы: примитивный → prop_set_type, ссылочный → internal
+        types = {t["path"]: t for t in self.fake.type_sets}
+        self.assertEqual(types["Справочник.Клон.Реквизит.Простой"]["type"]["types"],
+                         ["Строка"])
+        self.assertEqual(types["Справочник.Клон.Реквизит.Простой"]["type"]["length"], 50)
+        self.assertEqual(types["Справочник.Клон.Реквизит.Ссылочный"]["internal"],
+                         '{"#",f5c65050}')
+        # модуль скопирован
+        self.assertEqual(self.fake.modules[("Справочник.Клон", "МодульОбъекта")],
+                         "Сообщить(1);\r\n")
+        # синоним клона — через prop_set_internal (внутреннее представление)
+        syn = [a for op, a in self.fake.args_seen
+               if op == "prop_set_internal" and a.get("prop") == "Синоним"
+               and "Источник данных (копия)" in (a.get("internal") or "")]
+        self.assertEqual(len(syn), 1)
+
+    def test_clone_rejects_deep_path_and_unknown_cls(self) -> None:
+        with self.assertRaises(BridgeError):
+            self.tk.md_clone(path="Справочник.Х.Реквизит.У", new_name="К")
+        with self.assertRaises(BridgeError) as cm:
+            self.tk.md_clone(path="ОбщаяФорма.Х", new_name="К")
+        self.assertIn("не поддержано", str(cm.exception))
+
+
 class TestAddDelete(Base):
     def test_add_child_sibling(self) -> None:
         self.fake.objects[""] = {"name": "Конфигурация", "id": "root", "cls": "Конфигурация"}

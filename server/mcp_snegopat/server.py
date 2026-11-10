@@ -1104,6 +1104,123 @@ class Toolkit:
             res["calls"] = find_call_sites(text, calls_of)
         return res
 
+    _CLS_PLURAL = {"Справочник": "Справочники", "Документ": "Документы",
+                   "Обработка": "Обработки", "Отчет": "Отчеты",
+                   "Перечисление": "Перечисления", "РегистрСведений": "РегистрыСведений",
+                   "РегистрНакопления": "РегистрыНакопления"}
+
+    def _copy_attr(self, session: int | None, container: int | None,
+                   src_path: str, dst_path: str) -> None:
+        """Копия реквизита: md_add_child + тип из source (types → md_set_type,
+        internal → md_set_type_internal)."""
+        so = self._call(session, "md_object", self._a(container, path=src_path))
+        tval = None
+        for p in so.get("props", []):
+            if p.get("name") == "Тип":
+                tval = p.get("value")
+                break
+        self.md_add_child(session=session, container=container,
+                          owner_path=dst_path.rsplit(".Реквизит.", 1)[0],
+                          kind="Реквизиты", name=src_path.rsplit(".", 1)[-1])
+        if isinstance(tval, dict) and "internal" in tval:
+            self.md_set_type_internal(session=session, container=container,
+                                      path=dst_path, internal=tval["internal"])
+        elif isinstance(tval, dict) and tval.get("types"):
+            self.md_set_type(session=session, container=container, path=dst_path,
+                             types=tval["types"], length=tval.get("length"),
+                             digits=tval.get("digits"), fraction=tval.get("fraction"))
+
+    def md_clone(self, session: int | None = None, container: int | None = None,
+                 path: str = "", new_name: str = "",
+                 copy_modules: bool = True) -> dict:
+        """Клон объекта (IDEAS №18, MVP): новый объект того же вида + реквизиты
+        (типы переносятся: примитивные md_set_type, ссылочные internal-строкой),
+        табличные части с их реквизитами, синоним «… (копия)», модули при
+        copy_modules. НЕ копируются формы/макеты/СКД/подчинённые отчеты —
+        формы переносятся отдельно форм_get_xml/form_set_xml. path — верхнеуровневый
+        объект («Справочник.X»); new_name — имя клона (префикс/суффикс на вас)."""
+        parts = path.split(".")
+        if len(parts) != 2 or not new_name:
+            raise BridgeError("bad_args",
+                              "path — верхнеуровневый объект (Класс.Имя), new_name обязателен")
+        cls, name = parts
+        plural = self._CLS_PLURAL.get(cls)
+        if not plural:
+            raise BridgeError("bad_args", "клонирование вида «%s» не поддержано (MVP)" % cls)
+        src = self._call(session, "md_object", self._a(container, path=path))
+        new_path = cls + "." + new_name
+        self.md_add_child(session=session, container=container, owner_path="",
+                          kind=plural, name=new_name,
+                          synonym=((src.get("synonymRu") or name) + " (копия)"))
+        copied = {"attributes": 0, "tabular_parts": 0, "modules": 0}
+        attrs = self._call(session, "md_children",
+                           self._a(container, path=path, kind="Реквизиты"))
+        for a in attrs.get("items", []):
+            self._copy_attr(session, container,
+                            path + ".Реквизит." + a["name"],
+                            new_path + ".Реквизит." + a["name"])
+            copied["attributes"] += 1
+        tchs = self._call(session, "md_children",
+                          self._a(container, path=path, kind="ТабличныеЧасти"))
+        tch_skipped = 0
+        for t in tchs.get("items", []):
+            self.md_add_child(session=session, container=container,
+                              owner_path=new_path, kind="ТабличныеЧасти", name=t["name"])
+            copied["tabular_parts"] += 1
+            tattrs = self._call(session, "md_children",
+                                self._a(container, path=path + ".ТабличнаяЧасть." + t["name"],
+                                        kind="Реквизиты"))
+            for a in tattrs.get("items", []):
+                try:
+                    self._copy_attr(session, container,
+                                    path + ".ТабличнаяЧасть." + t["name"] + ".Реквизит." + a["name"],
+                                    new_path + ".ТабличнаяЧасть." + t["name"] + ".Реквизит." + a["name"])
+                    copied["attributes"] += 1
+                except BridgeError:
+                    # гвард 26.10: ПЕРВЫЙ реквизит пустой ТЧ клавиатурой не создаётся
+                    # (узел скрыт); XML-контур — docs/tch-first-attr-xml.md, вручную —
+                    # конфигуратор. Остальные реквизиты ТЧ добавляются sibling'ом
+                    # после ручного первого.
+                    tch_skipped += 1
+                    break
+        if tch_skipped:
+            copied["tch_attrs_skipped"] = tch_skipped
+            copied["note"] = ("реквизиты табличных частей пропущены: первый реквизит "
+                              "пустой ТЧ не автоматизирован (docs/tch-first-attr-xml.md)")
+        if copy_modules:
+            for m in src.get("modules", []):
+                src_text = self.module_get(session=session, container=container,
+                                           path=path, prop=m["prop"], with_text=True)
+                text = src_text.get("text") or ""
+                if not text:
+                    continue
+                new_mod = self.module_get(session=session, container=container,
+                                          path=new_path, prop=m["prop"])
+                self.module_set(session=session, container=container, path=new_path,
+                                prop=m["prop"], text=text,
+                                expected_hash=new_mod.get("hash"))
+                copied["modules"] += 1
+        return {"cloned": {"name": new_name, "cls": cls, "path": new_path},
+                "source": path, "copied": copied}
+
+    def yaxunit_run(self, base: str, epf: str, report: str,
+                    tests_path: str = "", timeout: int = 3600) -> dict:
+        """Прогон YAXUnit из командной строки (IDEAS №22, без конфигуратора):
+        1cv8 ENTERPRISE /Execute YAxUnit.epf с конфигом (jUnit-отчёт, автозакрытие
+        клиента). Возвращает сводку (тесты/провалы/ошибки + список упавших) или
+        yaxunit_error, если отчёт не создан (висящий диалог — сторож убивает
+        клиент; см. навык yaxunit-autotests: /CheckModules до прогона). Один прогон
+        на станцию — инструмент не трогает чужие клиенты."""
+        import sys as _sys
+        sys_tools = Path(__file__).resolve().parents[1] / "tools"
+        if str(sys_tools) not in _sys.path:
+            _sys.path.insert(0, str(sys_tools))
+        from yaxunit_run import run, YaxunitError  # noqa: E402
+        try:
+            return run(base, epf, report, tests_path or None, int(timeout))
+        except YaxunitError as e:
+            raise BridgeError("yaxunit_failed", str(e))
+
     def query_validate(self, query: str, base: str, mode: str = "check",
                        limit: int = 5) -> dict:
         """Валидация запроса 1С через внешнее соединение (IDEAS №21, без конфигуратора).
@@ -1413,7 +1530,7 @@ _TOOLS = [
     "ext_build_from_cf", "md_check_refs", "md_journal", "journal_configure", "doctor",
     "eventlog",
     "md_search_code", "module_structure",
-    "query_validate", "infobase",
+    "query_validate", "infobase", "md_clone", "yaxunit_run",
     "tree_activate", "tree_activate_group", "dialog_probe",
     "bridge_wait", "bridge_stats", "focus_probe",
 ]
