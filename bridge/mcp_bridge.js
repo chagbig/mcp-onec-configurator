@@ -462,6 +462,84 @@ OPS.editor_brkpt_state = function (a) {
         brkptState: st ? { enabled: st.enabled, checked: st.checked } : null };
 };
 
+// ---------- условная точка останова (Shift+F9 + модалка условия) ----------
+// Модификаторы через PostMessage не работают (приложение читает GetKeyState) —
+// keybd_event через DWX идёт в реальный поток ввода. Модалка условия
+// перехватывается onDoModal: probe-фаза (condition не задан) перечисляет
+// контролы и закрывает Отменой; fill-фаза заполняет строковый контрол значением
+// condition и жмёт ОК. Handler подключается ДО поста — модалка откроется на
+// следующем тике, необработанной она бы заблокировала сессию.
+var brkptCond = null;
+
+function onBrkptCondModal(d) {
+    try {
+        if (!brkptCond || brkptCond.done) return;
+        var ev = { stage: d.stage, caption: safeStr(d.caption) };
+        if (d.stage == 1) {
+            try { ev.controls = listControls(d.form); } catch (e) { ev.controlsErr = errStr(e); }
+            if (brkptCond.condition !== null && brkptCond.condition !== undefined) {
+                var setLog = [];
+                for (var i = 0; i < d.form.controlsCount; i++) {
+                    var c = d.form.getControl(i), nm = null, v = null;
+                    try { nm = String(c.name); } catch (eN) { continue; }
+                    if (!nm) continue;
+                    var low = nm.toLowerCase();
+                    if (low.indexOf("button") >= 0 || low.indexOf("btn") >= 0 || low == "ok" || low == "ок") continue;
+                    try { v = c.value; } catch (eV) { continue; }
+                    if (typeof v == "string") {
+                        try { d.form.getControl(nm).value = String(brkptCond.condition); setLog.push(nm); } catch (eS) {}
+                    }
+                }
+                ev.filled = setLog;
+                var okBtn = null;
+                for (var j = 0; j < d.form.controlsCount; j++) {
+                    var b = d.form.getControl(j), bn = null;
+                    try { bn = String(b.name); } catch (eB) { continue; }
+                    var bl = bn.toLowerCase();
+                    if (bl == "ok" || bl == "ок" || bl.indexOf("okbutton") >= 0 || bl == "buttonok") { okBtn = bn; break; }
+                }
+                if (okBtn) {
+                    try { d.form.sendEvent(d.form.getControl(okBtn).id, 0); ev.action = "нажата " + okBtn; }
+                    catch (eC) { ev.actionErr = errStr(eC); }
+                } else {
+                    ev.action = "кнопка ОК не найдена — Отмена";
+                    d.cancel = true; d.result = 2;
+                }
+            } else {
+                d.cancel = true; d.result = 2; ev.action = "Отмена (probe)";
+            }
+        }
+        brkptCond.modals.push(ev);
+        if (d.stage == 2 || d.stage == 3) brkptCond.done = true;
+    } catch (e) {}
+}
+
+var __dwxKbd = null;
+function _dwxKbd() {
+    if (!__dwxKbd) {
+        var dwx = new ActiveXObject("DynamicWrapperX");
+        dwx.Register("USER32.DLL", "keybd_event", "i=hhll");
+        __dwxKbd = dwx;
+    }
+    return __dwxKbd;
+}
+
+// Условная точка: НЕ РЕАЛИЗУЕМО из моста. Два зависания 10.11: Shift+F9 через
+// keybd_event модалку не открыл (модификаторы потерялись), sendCommand(CDebug,12)
+// с диалогом условия БЛОКИРУЕТ тик (как Brkpt — 60+ с, только taskkill). Вся
+// группа CDebug из тика небезопасна, кроме BrkptList (16, немодальная панель).
+// Условные точки — только вручную в конфигураторе.
+OPS.editor_brkpt_cond = function (a) {
+    throw new Error("условная точка останова из моста нереализуема: команды CDebug,12 "
+        + "блокируют тик (два зависания 10.11); поставьте вручную (Shift+F9 в конфигураторе)");
+};
+
+OPS.editor_brkpt_cond_state = function (a) {
+    if (!brkptCond) return { modals: [], done: false, note: "не запускалась" };
+    var r = { modals: brkptCond.modals, done: brkptCond.done };
+    return r;
+};
+
 OPS.session_info = function (a) {
     return { pid: myPid, conn: sessionBase.conn, platform: sessionBase.platform,
         bridge: BRIDGE_VERSION, modalMode: windows.modalMode, running: running,

@@ -259,6 +259,37 @@ class TestAddDelete(Base):
             self.tk.md_delete(path="Справочник.Х.Реквизит.У", uuid="")
         self.assertEqual(cm.exception.code, "bad_args")
 
+    def test_delete_confirm_plan_no_delete(self) -> None:
+        """№19: confirm=False — план (объект+ссылки), md_delete НЕ вызывается."""
+        self.fake.objects["Справочник.Х"] = {"name": "Х", "id": "x1", "cls": "Справочник"}
+        res = self.tk.md_delete(path="Справочник.Х", uuid="x1")
+        self.assertTrue(res["confirm_required"])
+        self.assertEqual(res["object"]["name"], "Х")
+        self.assertNotIn("md_delete", [op for op, _ in self.fake.args_seen])
+        self.assertIn("confirm=true", res["next"])
+
+    def test_delete_confirm_true_calls_bridge(self) -> None:
+        self.fake.objects["Справочник.Х"] = {"name": "Х", "id": "x1", "cls": "Справочник"}
+        self.tk.md_delete(path="Справочник.Х", uuid="x1", confirm=True)
+        self.assertIn("md_delete", [op for op, _ in self.fake.args_seen])
+
+    def test_update_db_cfg_confirm_plan(self) -> None:
+        """№19: confirm=False — план (контейнеры, предупреждение об isModified)."""
+        self.cfg.allow_update_db = True
+        self.cfg.own_bases = ['File="C:\\ib\\test";']
+        res = self.tk.update_db_cfg()
+        self.assertTrue(res["confirm_required"])
+        self.assertTrue(res["own_bases_ok"])
+        self.assertNotIn("update_db_cfg", [op for op, _ in self.fake.args_seen])
+
+    def test_update_db_cfg_confirm_true_calls_bridge(self) -> None:
+        self.cfg.allow_update_db = True
+        self.cfg.own_bases = ['File="C:\\ib\\test";']
+        self.tk.update_db_cfg(confirm=True)
+        upd = [a for op, a in self.fake.args_seen if op == "update_db_cfg"]
+        self.assertEqual(len(upd), 1)
+        self.assertEqual(upd[0]["own_bases"], ['File="C:\\ib\\test";'])
+
     def test_first_ts_attribute_refused(self) -> None:
         """Первый реквизит ТЧ — явный отказ до дерева (26.10.2026)."""
         calls = {"orig": self.tk.bridge.call}
@@ -289,7 +320,7 @@ class TestGating(Base):
     def test_update_db_cfg_allowed_passes_own_bases(self) -> None:
         self.cfg.allow_update_db = True
         self.cfg.own_bases = ['File="C:\\b";']
-        self.tk.update_db_cfg()
+        self.tk.update_db_cfg(confirm=True)
         upd = [a for op, a in self.fake.args_seen if op == "update_db_cfg"]
         self.assertEqual(upd[0]["own_bases"], ['File="C:\\b";'])
         self.assertIn("реорганизация информации", upd[0]["allowedDialogs"])

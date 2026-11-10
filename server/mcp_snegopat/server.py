@@ -462,13 +462,38 @@ class Toolkit:
         return res
 
     def md_delete(self, session: int | None = None, container: int | None = None,
-                  path: str = "", uuid: str = "") -> dict:
+                  path: str = "", uuid: str = "", confirm: bool = False) -> dict:
         """Удалить объект (только с явным uuid — инвариант 5). Перед удалением снимите
         md_children/md_object владельца; отчёт о ссылках частичный — штатный поиск ссылок
-        уходит в окно поиска без API чтения. Отказ хранилища/поддержки — без побочных действий."""
+        уходит в окно поиска без API чтения. Отказ хранилища/поддержки — без побочных действий.
+        Двухфазное подтверждение (№19): confirm=False (по умолчанию) — ТОЛЬКО план:
+        объект найден, md_check_refs, предупреждения; удаление НЕ выполняется.
+        confirm=True — само удаление."""
         if not uuid:
             raise BridgeError("bad_args", "uuid обязателен (удаление только по явному uuid)")
         pid = self._pid(session)
+        if not confirm:
+            plan: dict = {"confirm_required": True, "path": path, "uuid": uuid,
+                          "action": "md_delete"}
+            try:
+                obj = self._call(session, "md_object", self._a(container, path=path, uuid=uuid),
+                                 pid=pid)
+                plan["object"] = {k: obj.get(k) for k in ("name", "id", "cls")}
+            except BridgeError as e:
+                raise BridgeError("bad_args", "объект не найден: %s" % e)
+            try:
+                refs = self.md_check_refs(session=session,
+                                          object_name=plan["object"].get("name") or "")
+                plan["references"] = {k: refs.get(k) for k in
+                                      ("literals_total", "objects", "roles_subscriptions")
+                                      if k in refs}
+                refs_n = refs.get("literals_total")
+                if refs_n:
+                    plan["warning"] = ("найдено ссылок: %s — удаление сломает ссылки" % refs_n)
+            except (BridgeError, TypeError):
+                plan["references"] = None
+            plan["next"] = "повторите с confirm=true для удаления"
+            return plan
         self._focus_tree(pid, container, path)
         return self._call(session, "md_delete",
                           self._a(container, path=path, uuid=uuid,
@@ -510,16 +535,34 @@ class Toolkit:
         сообщений; errorLines — строки с ошибками. На больших конфигурациях — минуты."""
         return self._call(session, "syntax_check", {})
 
-    def update_db_cfg(self, session: int | None = None, container: int | None = None) -> dict:
+    def update_db_cfg(self, session: int | None = None, container: int | None = None,
+                      confirm: bool = False) -> dict:
         """Обновить конфигурацию БД. Только для баз из own_bases конфига сервера
         (нормализованное сравнение строки соединения; пустой список — отказ всегда) и только
         при allow_update_db. Незнакомые диалоги закрываются Отменой с отказом. НЕ ВЫПОЛНЕНО
-        вживую (этап 5): перед первым использованием прогоните на своей тестовой базе."""
+        вживую (этап 5): перед первым использованием прогоните на своей тестовой базе.
+        Двухфазное подтверждение (№19): confirm=False — план (права, isModified
+        контейнера, предупреждение о применении изменений к БД); confirm=True —
+        само обновление."""
         if not self.cfg.allow_update_db:
             raise BridgeError("forbidden",
                               "update_db_cfg запрещён конфигурацией сервера (allow_update_db)")
         if not self.cfg.own_bases:
             raise BridgeError("forbidden", "own_bases пуст — обновление БД запрещено (инвариант 5)")
+        if not confirm:
+            si = self.session_info(session=session)
+            conts = [c for c in si.get("containers", [])
+                     if container is None or c.get("index") == container]
+            plan = {"confirm_required": True, "action": "update_db_cfg",
+                    "own_bases_ok": True,
+                    "containers": [{k: c.get(k) for k in ("index", "identifier", "isModified")}
+                                   for c in conts]}
+            mod = [c for c in plan["containers"] if c.get("isModified")]
+            if mod:
+                plan["warning"] = ("контейнер(ы) изменены: %s — на БД применятся все правки "
+                                   "основной конфигурации" % ", ".join(str(c["index"]) for c in mod))
+            plan["next"] = "повторите с confirm=true для обновления"
+            return plan
         return self._call(session, "update_db_cfg",
                           self._a(container, own_bases=self.cfg.own_bases,
                                   allowedDialogs=self.cfg.update_db_allowed_dialogs))
@@ -1061,6 +1104,51 @@ class Toolkit:
             res["calls"] = find_call_sites(text, calls_of)
         return res
 
+    def query_validate(self, query: str, base: str, mode: str = "check",
+                       limit: int = 5) -> dict:
+        """Валидация запроса 1С через внешнее соединение (IDEAS №21, без конфигуратора).
+        Язык запросов read-only — исполнение безопасно по данным. mode=check (по
+        умолчанию): запрос оборачивается в «ВЫБРАТЬ ПЕРВЫЕ 1 * ИЗ (...)» — синтаксис
+        и метаданные дёшево (не работает для запросов с ИТОГИ); mode=execute —
+        как есть, вернутся колонки и до limit строк (тяжёлый запрос выполнится
+        целиком). base — путь файловой ИБ (не занятая конфигуратором). Ошибка
+        запроса = {ok:false, error: текст 1С} — это ВЕРДИКТ валидации."""
+        import sys as _sys
+        sys_tools = Path(__file__).resolve().parents[1] / "tools"
+        if str(sys_tools) not in _sys.path:
+            _sys.path.insert(0, str(sys_tools))
+        from query_validate import validate, QueryError  # noqa: E402
+        if not query or not query.strip():
+            raise BridgeError("bad_args", "query обязателен")
+        try:
+            return validate(base, query, mode, int(limit))
+        except QueryError as e:
+            raise BridgeError("bad_args", str(e))
+
+    def infobase(self, action: str, path: str, confirm: bool = False) -> dict:
+        """Создание/удаление файловых инфобаз (IDEAS №23, без конфигуратора).
+        action=create: пакетный CREATEINFOBASE (идемпотентно — существующая база
+        вернёт already_exists). action=delete: ДВУХФАЗНО (№19) — confirm=False даёт
+        план (существует ли база, занятость .cfl, гвард own_bases — MCP-стенды
+        защищены), confirm=True удаляет каталог ИБ целиком. Гварды: в каталоге
+        обязан быть 1Cv8.1CD."""
+        import sys as _sys
+        sys_tools = Path(__file__).resolve().parents[1] / "tools"
+        if str(sys_tools) not in _sys.path:
+            _sys.path.insert(0, str(sys_tools))
+        from ib_mgmt import create, plan_delete, delete, IbError  # noqa: E402
+        if not path:
+            raise BridgeError("bad_args", "path обязателен")
+        try:
+            if action == "create":
+                return create(path)
+            if action == "delete":
+                own = list(self.cfg.own_bases or [])
+                return delete(path, own) if confirm else plan_delete(path, own)
+            raise BridgeError("bad_args", "action: create|delete")
+        except IbError as e:
+            raise BridgeError("ib_failed", str(e))
+
     def ext_save(self, session: int, name: str) -> dict:
         """Сохранить расширение (штатное «Сохранить документ» при активном дереве
         расширения — Frame.FileSave). Проверено живьём (28.10.2026): isModified → False,
@@ -1325,6 +1413,7 @@ _TOOLS = [
     "ext_build_from_cf", "md_check_refs", "md_journal", "journal_configure", "doctor",
     "eventlog",
     "md_search_code", "module_structure",
+    "query_validate", "infobase",
     "tree_activate", "tree_activate_group", "dialog_probe",
     "bridge_wait", "bridge_stats", "focus_probe",
 ]
