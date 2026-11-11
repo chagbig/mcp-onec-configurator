@@ -285,6 +285,68 @@ class Toolkit:
             args["expected"] = expected
         return self._call(session, "prop_set", args)
 
+    def md_rename(self, session: int | None = None, container: int | None = None,
+                  path: str = "", new_name: str = "", uuid: str = "",
+                  cascade: bool = False, dump_dir: str = "") -> dict:
+        """Каскадное переименование (IDEAS №17): md_set_property(Имя) + переписывание
+        литералов ссылок в МОДУЛЯХ ссылающихся объектов (EN-квалификаторы Document.X/
+        DocumentRef.X…, рус менеджеры Документы.X, рус типы ДокументСсылка.X;
+        ОбщийМодуль — голое имя при длине >= 5). Каскад ищет цели по XML-ВЫГРУЗКЕ
+        (dump_dir — свежая от md_check_refs; при cascade=true без dump_dir — отказ:
+        выгрузка снимается там же за минуты на 2 ГБ). Каждый модуль переписывается
+        module_set с expected_hash (страж от параллельных правок). Формы НЕ
+        переписываются автоматически — в ответе forms (их контур form_get_xml/
+        form_set_xml). Типы реквизитов/подсистемы не ломаются — переименование
+        сохраняет uuid. Верификация: post md_object по новому пути с uuid."""
+        import sys as _sys
+        sys_tools = Path(__file__).resolve().parents[1] / "tools"
+        if str(sys_tools) not in _sys.path:
+            _sys.path.insert(0, str(sys_tools))
+        from ref_rewrite import rewrite_refs, module_targets_from_dump  # noqa: E402
+        parts = path.split(".")
+        if len(parts) != 2 or not new_name or not uuid:
+            raise BridgeError("bad_args",
+                              "path — Класс.Имя, new_name и uuid обязательны (сверка адресата)")
+        cls, old = parts
+        src = self._call(session, "md_object", self._a(container, path=path, uuid=uuid))
+        res: dict = {"renamed": {k: src.get(k) for k in ("name", "id", "cls")},
+                     "new_name": new_name, "cascade": bool(cascade)}
+        rename = self.md_set_property(session=session, container=container,
+                                      path=path, prop="Имя", value=new_name, uuid=uuid)
+        res["set"] = rename.get("after")
+        if not cascade:
+            res["note"] = "каскад выключен: ссылки в модулях НЕ переписаны (md_check_refs)"
+            return res
+        if not dump_dir:
+            raise BridgeError("bad_args",
+                              "cascade=true требует dump_dir (свежая выгрузка от md_check_refs)")
+        targets, forms = module_targets_from_dump(dump_dir, old)
+        rewritten, failed = [], []
+        allow_bare = cls == "ОбщийМодуль" and len(old) >= 5
+        for t in targets:
+            try:
+                mod = self.module_get(session=session, container=container,
+                                      path=t["path"], prop=t["prop"], with_text=True)
+                text = mod.get("text") or ""
+                new_text = rewrite_refs(text, cls, old, new_name, allow_bare=allow_bare)
+                if new_text == text:
+                    rewritten.append({**t, "status": "no-change"})
+                    continue
+                self.module_set(session=session, container=container, path=t["path"],
+                                prop=t["prop"], text=new_text,
+                                expected_hash=mod.get("hash"))
+                rewritten.append({**t, "status": "rewritten"})
+            except BridgeError as e:
+                failed.append({**t, "error": str(e)[:120]})
+        post = self._call(session, "md_object",
+                          self._a(container, path=cls + "." + new_name, uuid=uuid))
+        res.update({"rewritten": rewritten, "forms": forms, "failed": failed,
+                    "post": {k: post.get(k) for k in ("name", "id", "cls")}})
+        if forms:
+            res["warning"] = ("модули форм с литералами (%d шт) НЕ переписаны "
+                              "автоматически — form_get_xml/form_set_xml" % len(forms))
+        return res
+
     def md_set_property_internal(self, session: int | None = None, container: int | None = None,
                                  path: str = "", prop: str = "", internal: str = "",
                                  expect_before: str | None = None,
@@ -1530,7 +1592,7 @@ _TOOLS = [
     "ext_build_from_cf", "md_check_refs", "md_journal", "journal_configure", "doctor",
     "eventlog",
     "md_search_code", "module_structure",
-    "query_validate", "infobase", "md_clone", "yaxunit_run",
+    "query_validate", "infobase", "md_clone", "yaxunit_run", "md_rename",
     "tree_activate", "tree_activate_group", "dialog_probe",
     "bridge_wait", "bridge_stats", "focus_probe",
 ]
