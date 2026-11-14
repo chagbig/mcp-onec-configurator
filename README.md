@@ -1,0 +1,211 @@
+# mcp-onec-configurator: MCP server for the live 1C:Enterprise Configurator (via Snegopat)
+
+**English:** an MCP server that lets an AI agent work inside a **live 1C:Enterprise
+Configurator** — read/write metadata, modules and forms, create/delete objects,
+diff configurations, run YAXUnit tests — without the export/import-XML loop.
+Windows-only (64-bit Configurator), works alongside the Snegopat add-in host.
+Russian documentation below; stage-by-stage build reports live in [docs/](docs).
+
+> Disclaimer: an independent community tool, licensed under [Apache-2.0](LICENSE).
+> Not affiliated with 1C / 1C:Enterprise (1C Company), and not a part of
+> Snegopat — requires the Snegopat add-in host to run (their licenses apply
+> to those products respectively).
+
+---
+
+## mcp-configurator: MCP-сервер живого конфигуратора 1С (Снегопат)
+
+MCP-сервер, через который агент работает с **открытым конфигуратором 1С** человека:
+читает дерево метаданных и модули, правит их, создаёт и удаляет объекты, сохраняет
+конфигурацию с архивной точкой отката — без циклов «выгрузить XML → загрузить XML».
+
+План и история — [docs/plan-mcp-snegopat.md](docs/plan-mcp-snegopat.md);
+отчёт по сборке (этапы 2–6) — [docs/stage-02-06-mcp-server.md](docs/stage-02-06-mcp-server.md).
+
+```
+MCP-клиент (stdio, JSON-RPC)
+   │
+mcp-snegopat (Python, mcp>=2.3)          server/mcp_snegopat/
+   │ JSON-файлы, по сессии конфигуратора
+   │   Y:\Snegopat-mcp\mcp\sessions\<pid>\{req,resp,session.json}
+   ▼
+аддин mcp_bridge.js в 1cv8.exe (Снегопат) bridge/mcp_bridge.js
+   │ тик таймера 150 мс, только при !busy и без модального окна
+   ▼
+конфигуратор: метаданные / модули / команды / дерево (этап 7)
+```
+
+## Дистрибутивы (не входят в репозиторий)
+
+Установщику (`install.ps1`) нужны два сторонних дистрибутива — скачайте их сами
+и положите рядом (в корень или в `mcp-configurator\`):
+
+| Что | Где взять | Зачем |
+|---|---|---|
+| Snegopat (x64, 3.0.66+) | страница проекта Снегопата (orefkov) | хост-аддин, внедряется в конфигуратор |
+| DynamicWrapperX 2.2.0.0 | script-coding.com | WinAPI-обёртка (per-user регистрация установщиком) |
+
+Без них сервер ставится, но мост не загрузится в конфигуратор.
+
+## Состав
+
+| Что | Где | Назначение |
+|---|---|---|
+| Мост (аддин JScript) | `bridge/mcp_bridge.js` → `Y:\Snegopat-mcp\x64\modules\snegopat\addins\mcp\` | реестр сессий, диспетчер операций, идемпотентность по id, статусы running, автоответ только знакомым диалогам |
+| MCP-сервер (Python, stdio) | `server/` (пакет `mcp_snegopat`, `pip install -e server`) | 44 инструмента (метаданные, модули, формы XML, расширения, конвейер build_ext, журнал правок), конфиг разрешений, таймауты, журнал вызовов |
+| Тесты | `server/tests/` | 27 юнит-тестов на подставном мосте, stdio-смоук, живой e2e-прогон |
+| Документация | `docs/` | план, отчёты этапов |
+
+
+
+## Расширения и конвейер «из сравнения двух cf» (этапы 13–15)
+
+Работа с расширениями: `ext_list` (открытые), `ext_create` (мастер-раннер), `ext_save`,
+`ext_dump_cfe` (cfe по копии базы), `ext_open`, штатные операции метаданных через
+`container=N` расширения.
+
+**Конвейер «расширение из сравнения двух cf»** — `server/tools/build_ext.py`:
+одна команда собирает расширение из отличий cf1 (вендорский эталон) и cf2
+(доработанная):
+
+```bash
+python server/tools/build_ext.py <cf1> <cf2> --name МсрДиф --prefix Мср14_
+# → diff (XML-канон) → расширение (заимствование+наполнение+перехватчики) → cfe
+# → верификации (вендор цел, CheckModules, постусловие форм) → отчёт report.json
+```
+
+Переносит: изменённые модули (перехватчики ИзменениеИКонтроль), добавленные реквизиты
+(Adopted-контейнеры + собственные с префиксом), **изменённые формы объектов**
+(этап 15: замещающая Adopted-форма с полным контентом cf2 и модулем; повторный прогон
+идемпотентен — cfe байт-в-байт). В отчёт (не переносится автоматически): новые формы
+без оригинала в cf1 (`new_forms_cf2`), общие формы, новые/удалённые объекты, изменение
+типов. cfe загружается в линию пакетно:
+`/LoadCfg <cfe> -Extension <Имя>` + `/UpdateDBCfg -Extension` + `/CheckModules -Extension`.
+
+Инструменты cf: `server/tools/cf_inspect.py` (чтение контейнера cf без платформы),
+`cf_diff.py` (сравнение двух cf, XML-канон), `form_text.py` (нормализатор текста форм),
+`mockup_init.py`, `mcp_to_line.py`. Подробности: `docs/stage-13-extensions.md`,
+`docs/stage-14-cf-diff-ext.md`, `docs/stage-15-forms-in-ext.md`.
+
+MCP-инструмент `ext_build_from_cf` (этап 16) — тот же конвейер одной командой агента
+(cf1, cf2, name, prefix; малые пары — минуты, 2 ГБ — ~50 мин). Доставка cfe в линию —
+`mcp_to_line.py --cfe <файл> --ext-name <Имя> --line-base <база>`: Load/Check/Update
+-Extension + постусловие «записи cfe == снятой копии» (молчаливый пропуск
+несуществующего имени отсечён).
+
+## Установка
+
+1. Снегопат: сборка в `Y:\Snegopat-mcp\x64` (это машина владельца; путь без кириллицы).
+   `starter.exe` запущен; `std/main.js` грузит минимальный комплект + `addins\mcp\mcp_bridge.js`.
+2. Файл включения `Y:\Snegopat-mcp\mcp\mcp_bridge.on` (без него мост не ставит таймер — инвариант 8).
+3. DynamicWrapperX 2.2.0.0 — per-user регистрация (`regsvr32 /i Y:\Snegopat-mcp\bin\dynwrapx.dll`,
+   x64; x86-вариант рядом — `dynwrapx32.dll`); нужен мышиному контуру (фокус/клики).
+4. Сервер: `pip install -e server` (Python ≥3.11, ставит `mcp`); команда `mcp-snegopat`.
+5. Конфиг (необязателен, безопасные умолчания) — JSON-файл, путь в `MCP_SNEGOPAT_CONFIG`
+   или `%LOCALAPPDATA%\mcp-snegopat\config.json` (пример — `server/mcp_snegopat.json.example`):
+
+```json
+{
+  "root": "Y:\\Snegopat-mcp\\mcp",
+  "own_bases": ["File=\"Y:\\Snegopat-mcp\\bases\\empty_mcp\";"],
+  "allow_store": false,
+  "allow_update_db": false
+}
+```
+
+5. Подключение к агенту. Для ZCode — секция `mcp.servers` в `~/.zcode/cli/config.json`
+   (подключается автоматически, проверено 24.10.2026):
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "mcp-snegopat": {
+        "command": "python",
+        "args": ["-m", "mcp_snegopat"],
+        "env": {"MCP_SNEGOPAT_CONFIG": "Y:\\mcp-configurator\\mcp_snegopat.json"}
+      }
+    }
+  }
+}
+```
+
+## Инструменты (кратко)
+
+Чтение: `list_sessions` (плюс признак `platformSupported`), `session_info`, `md_tree`
+(пагинация), `md_object` (свойства со значениями, модули с хешами), `md_children`,
+`md_find`, `md_counts`, `md_walk`, `module_get`, `type_lookup`.
+
+Запись (постусловия в мосте, ожидаемое состояние обязательно): `module_set`,
+`module_patch`, `md_set_property(_internal)`, `md_set_synonym` (синоним — внутренним
+представлением локализуемой строки, проверено живьём), `md_set_type(_internal)`,
+`md_add_child` (синоним можно задать сразу при создании), `md_delete`.
+
+Создание объектов: верхний уровень (Константы…Задачи) и весь узел «Общие» (Подсистемы,
+ОбщиеМодули, ПараметрыСеанса, Роли, ОбщиеРеквизиты, ПланыОбмена, КритерииОтбора,
+ПодпискиНаСобытия, РегламентныеЗадания, Боты, ФункциональныеОпции,
+ПараметрыФункциональныхОпций, ОпределяемыеТипы, ХранилищаНастроек, ОбщиеКоманды,
+ГруппыКоманд — координаты сняты автосъёмом 24.10.2026); реквизиты/ТЧ/формы/команды/макеты
+у справочников и документов; измерения/ресурсы/реквизиты регистров сведений; значения
+перечислений. ОбщиеФормы/ОбщиеМакеты открывают конструкторы — нужен `wizard`.
+
+Конфигурация: `config_open`, `cfg_archive_cf` (точка отката), `config_save` (без
+архива снимает сам; отказ без него), `syntax_check`, `update_db_cfg` (только `own_bases`;
+проверен живьём 24.10.2026 — диалог «Реорганизация информации» закрывается разрешённым
+заголовком). Хранилище (`cfgstore_capture`/`cfgstore_commit`, по разрешению
+`allow_store`) — **проверено живьём 24.10.2026** на своём файловом хранилище
+(`stg-probe/repo3`): порядок «захват → правка → сохранение → помещение», поле комментария
+`EnrollComment`, верификация отчётом по версиям (версия 2 с комментарием создана).
+
+Формы: `form_export` / `form_import` — внутренний текст 1С (не XML; перевод XML ↔
+внутренний текст — этап 8 плана, не сделан). Служебные: `tree_activate`,
+`tree_activate_group`, `tree_nav`, `dialog_probe`, `focus_probe`, `bridge_wait`,
+`bridge_stats`.
+
+Платформа: сессии вне ветки 8.3.27 не выбираются (сдвиг vtable; обход —
+`allow_unverified_platform` в конфиге).
+
+## Порядок работы агента
+
+1. `list_sessions` → выбрать сессию (pid) и контейнер; при нескольких конфигураторах
+   pid указывается в каждом вызове.
+2. `config_open`, если основная конфигурация не открыта (после старта current — БД).
+3. Чтение: `md_tree`/`md_find` → `md_object`/`module_get` (хеш нужен для записи).
+4. Запись с ожидаемым состоянием (`expected_hash`/`expected`): расхождение = параллельная
+   правка → отказ.
+5. Сохранение: `config_save` (архив cf — точка отката — автоматически).
+6. Проверка созданного обратным чтением.
+
+## Ограничения и правила безопасности
+
+* Только своя рабочая станция и свои базы; на CI-раннерах и общих базах не используется
+  (`starter.exe` внедряется во все `1cv8.exe` пользователя).
+* Все операции — в главном потоке конфигуратора из тика таймера; `busy` + модальное окно
+  отсекают повторный вход. Ответ — только к моменту завершения: таймаут MCP не значит
+  «не выполнено» (статус `running` в `list_sessions`, `bridge_wait(id)`).
+* Запись без ожидаемого состояния отказывает; каждое изменение подтверждается обратным
+  чтением (инварианты 3–4 плана).
+* `config_save` — только после архива cf (последнее сохранённое состояние); обновление
+  конфигурации БД — только для `own_bases`; помещение в хранилище — с комментарием, по
+  одному объекту.
+* Синонимы записываются через md_set_synonym (внутреннее представление локализуемых строк); формы — во
+  внутреннем формате; `setModuleText` платформы пуст — запись через редактор.
+* Платформа 8.3.27.2074; Снегопат 1.6.40 (ours 1.6.40, Core.As 1.0.2.4, выпуск 22.10.2026;
+  переход с 1.6.3 выполнен 24.10.2026, приёмка e2e 28/28 с первого прогона; предыдущая
+  установка — `Y:\Snegopat-mcpd-1.6.3-backup`). На 8.3.28 нужен пересъём слотов
+  (`dump-tools`).
+
+## Запуск проверок
+
+```
+python server/tests/test_all.py            # юнит-тесты (подставной мост)
+python server/tests/smoke_stdio.py         # протокол MCP по stdio
+python server/tests/live_e2e.py [pid]      # живой прогон (нужен открытый конфигуратор)
+```
+
+---
+
+## Лицензия
+
+Код и документация — [Apache-2.0](LICENSE).
+Сторонние продукты (1С:Предприятие, Снегопат) распространяются по своим лицензиям.
