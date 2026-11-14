@@ -1,0 +1,488 @@
+D:\a\mcp-onec-configurator\mcp-onec-configurator\server\tests\test_doctor_drift.py:3: SyntaxWarning: invalid escape sequence '\s'
+  �\u0414\u0440\u0435\u0439\u0444 \u043c\u043e\u0441\u0442\u0430�: md5 \u0440\u0430\u0437\u0432\u0451\u0440\u043d\u0443\u0442\u043e\u0433\u043e mcp_bridge.js (\u0432\u0441\u0435 <\u0434\u043e\u043c>\snegopat\<\u0432\u0435\u0440>\ \u0438
+D:\a\mcp-onec-configurator\mcp-onec-configurator\server\tools\doctor.py:15: SyntaxWarning: invalid escape sequence '\s'
+  - �\u0434\u0440\u0435\u0439\u0444 \u043c\u043e\u0441\u0442\u0430�: md5 \u0440\u0430\u0437\u0432\u0451\u0440\u043d\u0443\u0442\u043e\u0433\u043e mcp_bridge.js (\u0432\u0441\u0435 <\u0434\u043e\u043c>\snegopat\<\u0432\u0435\u0440>\
+test_add_child_group_nav (test_all.TestAddDelete.test_add_child_group_nav) ... ok
+test_add_child_no_tree_focus (test_all.TestAddDelete.test_add_child_no_tree_focus) ... ok
+test_add_child_sibling (test_all.TestAddDelete.test_add_child_sibling) ... ok
+test_add_child_unknown_kind (test_all.TestAddDelete.test_add_child_unknown_kind) ... ok
+test_delete_confirm_plan_no_delete (test_all.TestAddDelete.test_delete_confirm_plan_no_delete)
+\u211619: confirm=False � \u043f\u043b\u0430\u043d (\u043e\u0431\u044a\u0435\u043a\u0442+\u0441\u0441\u044b\u043b\u043a\u0438), md_delete \u041d\u0415 \u0432\u044b\u0437\u044b\u0432\u0430\u0435\u0442\u0441\u044f. ... ok
+test_delete_confirm_true_calls_bridge (test_all.TestAddDelete.test_delete_confirm_true_calls_bridge) ... ok
+test_delete_requires_uuid (test_all.TestAddDelete.test_delete_requires_uuid) ... ok
+test_first_ts_attribute_refused (test_all.TestAddDelete.test_first_ts_attribute_refused)
+\u041f\u0435\u0440\u0432\u044b\u0439 \u0440\u0435\u043a\u0432\u0438\u0437\u0438\u0442 \u0422\u0427 � \u044f\u0432\u043d\u044b\u0439 \u043e\u0442\u043a\u0430\u0437 \u0434\u043e \u0434\u0435\u0440\u0435\u0432\u0430 (26.10.2026). ... ok
+test_update_db_cfg_confirm_plan (test_all.TestAddDelete.test_update_db_cfg_confirm_plan)
+\u211619: confirm=False � \u043f\u043b\u0430\u043d (\u043a\u043e\u043d\u0442\u0435\u0439\u043d\u0435\u0440\u044b, \u043f\u0440\u0435\u0434\u0443\u043f\u0440\u0435\u0436\u0434\u0435\u043d\u0438\u0435 \u043e\u0431 isModified). ... ok
+test_update_db_cfg_confirm_true_calls_bridge (test_all.TestAddDelete.test_update_db_cfg_confirm_true_calls_bridge) ... ok
+test_dead_session_marked (test_all.TestBridge.test_dead_session_marked) ... ok
+test_error_op_raises_with_code (test_all.TestBridge.test_error_op_raises_with_code) ... ok
+test_no_sessions_empty_ok (test_all.TestBridge.test_no_sessions_empty_ok) ... ok
+test_pick_session_missing_pid (test_all.TestBridge.test_pick_session_missing_pid) ... ok
+test_ping_roundtrip (test_all.TestBridge.test_ping_roundtrip) ... ok
+test_platform_gate (test_all.TestBridge.test_platform_gate)
+\u041d\u0435\u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u043d\u0430\u044f \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0430 � \u0441\u0435\u0441\u0441\u0438\u044f \u043d\u0435 \u0432\u044b\u0431\u0438\u0440\u0430\u0435\u0442\u0441\u044f; \u0444\u043b\u0430\u0433 \u0441\u043d\u0438\u043c\u0430\u0435\u0442 \u0437\u0430\u043f\u0440\u0435\u0442. ... ok
+test_timeout (test_all.TestBridge.test_timeout) ... ok
+test_unknown_op (test_all.TestBridge.test_unknown_op) ... ok
+test_chained_toc_walked_sequentially (test_all.TestCfInspect.test_chained_toc_walked_sequentially)
+TOC-\u0441\u0442\u0440\u0430\u043d\u0438\u0446\u0430 \u0441 \u043d\u0435\u0442\u0435\u0440\u043c\u0438\u043d\u0430\u043b\u044c\u043d\u044b\u043c next \u043d\u0435 \u0441\u0440\u044b\u0432\u0430\u0435\u0442 \u043e\u0431\u0445\u043e\u0434 (cf 2 \u0413\u0411, 28.10). ... ok
+test_header_name (test_all.TestCfInspect.test_header_name) ... ok
+test_header_name_rejects_garbage (test_all.TestCfInspect.test_header_name_rejects_garbage) ... ok
+test_header_name_short (test_all.TestCfInspect.test_header_name_short) ... ok
+test_identical_zero_candidates (test_all.TestCfRecDiff.test_identical_zero_candidates) ... skipped '\u043c\u0430\u043b\u0430\u044f \u043f\u0430\u0440\u0430 cf \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430 \u043d\u0430 \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u0435'
+test_named_extracts_form_name (test_all.TestCfRecDiff.test_named_extracts_form_name) ... skipped '\u043c\u0430\u043b\u0430\u044f \u043f\u0430\u0440\u0430 cf \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430 \u043d\u0430 \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u0435'
+test_service_records_excluded (test_all.TestCfRecDiff.test_service_records_excluded) ... skipped '\u043c\u0430\u043b\u0430\u044f \u043f\u0430\u0440\u0430 cf \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430 \u043d\u0430 \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u0435'
+test_small_pair_one_changed_record (test_all.TestCfRecDiff.test_small_pair_one_changed_record) ... skipped '\u043c\u0430\u043b\u0430\u044f \u043f\u0430\u0440\u0430 cf \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430 \u043d\u0430 \u044d\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u0435'
+test_changed_and_new_forms (test_all.TestCollectFormTargets.test_changed_and_new_forms) ... ok
+test_module_deleted_in_only1_detected (test_all.TestCollectFormTargets.test_module_deleted_in_only1_detected) ... ok
+test_non_form_paths_ignored (test_all.TestCollectFormTargets.test_non_form_paths_ignored) ... ok
+test_defaults_safe (test_all.TestConfig.test_defaults_safe) ... ok
+test_int_keys_from_example (test_all.TestConfig.test_int_keys_from_example)
+\u0411\u0430\u0433-\u0440\u0435\u043f\u043e\u0440\u0442 \u0447\u0438\u0441\u0442\u043e\u0439 \u043c\u0430\u0448\u0438\u043d\u044b (v1.2.1): int-\u043a\u043b\u044e\u0447\u0438 example (journal_keep=3) ... ok
+test_load_from_file (test_all.TestConfig.test_load_from_file) ... ok
+test_unknown_key_rejected (test_all.TestConfig.test_unknown_key_rejected) ... ok
+test_idempotent_uuid (test_all.TestCreateOwnObject.test_idempotent_uuid) ... ok
+test_own_object_created (test_all.TestCreateOwnObject.test_own_object_created) ... ok
+test_registration_in_configuration (test_all.TestCreateOwnObject.test_registration_in_configuration) ... ok
+test_rename_map_between_new_objects (test_all.TestCreateOwnObject.test_rename_map_between_new_objects)
+\u0418\u0434\u0435\u044f 1: \u0441\u0441\u044b\u043b\u043a\u0430 \u043d\u043e\u0432\u043e\u0433\u043e \u043e\u0431\u044a\u0435\u043a\u0442\u0430 A \u043d\u0430 \u043d\u043e\u0432\u044b\u0439 \u043e\u0431\u044a\u0435\u043a\u0442 B \u043f\u0435\u0440\u0435\u0438\u043c\u0435\u043d\u043e\u0432\u044b\u0432\u0430\u0435\u0442\u0441\u044f ... ok
+test_rename_map_no_false_positives (test_all.TestCreateOwnObject.test_rename_map_no_false_positives) ... ok
+test_rename_own_refs (test_all.TestCreateOwnObject.test_rename_own_refs) ... ok
+test_fatal_phrase_rejected (test_all.TestDesignerVerdict.test_fatal_phrase_rejected) ... ok
+test_missing_res_rejected (test_all.TestDesignerVerdict.test_missing_res_rejected) ... ok
+test_ok (test_all.TestDesignerVerdict.test_ok) ... ok
+test_res_nonzero_rejected (test_all.TestDesignerVerdict.test_res_nonzero_rejected) ... ok
+test_dwx_unregistered_is_fail (test_all.TestDoctor.test_dwx_unregistered_is_fail)
+DWX: \u0435\u0441\u043b\u0438 \u0432 HKCU \u043a\u043b\u044e\u0447\u0430 \u043d\u0435\u0442 � fail (\u043d\u0430 \u043c\u0430\u0448\u0438\u043d\u0435 \u0440\u0430\u0437\u0440\u0430\u0431\u043e\u0442\u043a\u0438 \u043e\u043d \u0435\u0441\u0442\u044c; ... ok
+test_missing_marker_and_flag_fail (test_all.TestDoctor.test_missing_marker_and_flag_fail) ... ok
+test_tool_doctor_with_live_fake_session (test_all.TestDoctor.test_tool_doctor_with_live_fake_session) ... ok
+test_verdict_ok_on_fresh_home (test_all.TestDoctor.test_verdict_ok_on_fresh_home)
+\u0421\u0442\u0430\u0440\u0442\u0435\u0440 \u043d\u0435 \u0437\u0430\u043f\u0443\u0449\u0435\u043d (\u043d\u0435\u0442 starter.exe) \u2192 starter=fail � \u043f\u0440\u043e\u0432\u0435\u0440\u044f\u0435\u043c \u0442\u043e\u043b\u044c\u043a\u043e ... skipped 'doctor-\u0432\u0435\u0440\u0434\u0438\u043a\u0442 \u0437\u0430\u0432\u0438\u0441\u0438\u0442 \u043e\u0442 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043d\u043e\u0439 \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u044b 1\u0421 (\u043d\u0430 CI \u0435\u0451 \u043d\u0435\u0442)'
+test_cli_offline_clear_error (test_all.TestEventlogCfg.test_cli_offline_clear_error)
+CLI \u0431\u0435\u0437 COM (\u0431\u0430\u0437\u0430 \u043d\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u0435\u0442) � \u043f\u043e\u043d\u044f\u0442\u043d\u0430\u044f \u043e\u0448\u0438\u0431\u043a\u0430, \u043d\u0435 traceback. ... ok
+test_get_requires_existing_base (test_all.TestEventlogCfg.test_get_requires_existing_base) ... ok
+test_known_events_valid_shape (test_all.TestEventlogCfg.test_known_events_valid_shape) ... ok
+test_set_unknown_event_rejected (test_all.TestEventlogCfg.test_set_unknown_event_rejected) ... ok
+test_empty_name_rejected (test_all.TestExtBuildFromCf.test_empty_name_rejected) ... ok
+test_missing_cf_rejected (test_all.TestExtBuildFromCf.test_missing_cf_rejected) ... ok
+test_work_lock_rejects_parallel (test_all.TestExtBuildFromCf.test_work_lock_rejects_parallel)
+\u0420\u0435\u0432\u044c\u044e M9: \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044e\u0449\u0438\u0439 lock � \u043e\u0442\u043a\u0430\u0437, \u0447\u0443\u0436\u0430\u044f \u0441\u0431\u043e\u0440\u043a\u0430 \u043d\u0435 \u043f\u043e\u0440\u0442\u0438\u0442\u0441\u044f. ... ok
+test_adopted_tch_with_new_attr (test_all.TestFillShellAdopted.test_adopted_tch_with_new_attr) ... ok
+test_adopted_tch_without_new_attrs_skipped (test_all.TestFillShellAdopted.test_adopted_tch_without_new_attrs_skipped) ... ok
+test_normalize_active_element (test_all.TestFormText.test_normalize_active_element) ... ok
+test_normalize_keeps_other_fields (test_all.TestFormText.test_normalize_keeps_other_fields) ... ok
+test_normalize_real_shape (test_all.TestFormText.test_normalize_real_shape) ... ok
+test_texts_equal_eol (test_all.TestFormText.test_texts_equal_eol) ... ok
+test_cf_key_identity (test_all.TestFormXmlCacheHelpers.test_cf_key_identity) ... ok
+test_tread_marker_roundtrip (test_all.TestFormXmlCacheHelpers.test_tread_marker_roundtrip) ... ok
+test_gc_arch_cfs (test_all.TestFormXmlValidateAndGc.test_gc_arch_cfs) ... ok
+test_gc_work_keeps_newest_and_excludes_current (test_all.TestFormXmlValidateAndGc.test_gc_work_keeps_newest_and_excludes_current) ... ok
+test_validate_broken (test_all.TestFormXmlValidateAndGc.test_validate_broken) ... ok
+test_validate_ok (test_all.TestFormXmlValidateAndGc.test_validate_ok) ... ok
+test_validate_wrong_root (test_all.TestFormXmlValidateAndGc.test_validate_wrong_root) ... ok
+test_cfgstore_commit_needs_comment (test_all.TestGating.test_cfgstore_commit_needs_comment) ... ok
+test_cfgstore_forbidden_default (test_all.TestGating.test_cfgstore_forbidden_default) ... ok
+test_module_set_requires_hash (test_all.TestGating.test_module_set_requires_hash) ... ok
+test_rename_requires_uuid (test_all.TestGating.test_rename_requires_uuid) ... ok
+test_update_db_cfg_allowed_passes_own_bases (test_all.TestGating.test_update_db_cfg_allowed_passes_own_bases) ... ok
+test_update_db_cfg_forbidden_default (test_all.TestGating.test_update_db_cfg_forbidden_default) ... ok
+test_update_db_cfg_own_bases_empty (test_all.TestGating.test_update_db_cfg_own_bases_empty) ... ok
+test_bad_keep_rejected (test_all.TestJournalConfigure.test_bad_keep_rejected) ... ok
+test_bad_kinds_rejected (test_all.TestJournalConfigure.test_bad_kinds_rejected) ... ok
+test_partial_update_keeps_other_keys (test_all.TestJournalConfigure.test_partial_update_keeps_other_keys) ... ok
+test_write_and_defaults (test_all.TestJournalConfigure.test_write_and_defaults) ... ok
+test_idempotent (test_all.TestMakeSnegopatSet.test_idempotent) ... ok
+test_leaf_added_with_counter (test_all.TestMakeSnegopatSet.test_leaf_added_with_counter) ... ok
+test_missing_key_rejected (test_all.TestMakeSnegopatSet.test_missing_key_rejected) ... ok
+test_row_format_matches_neighbors (test_all.TestMakeSnegopatSet.test_row_format_matches_neighbors) ... ok
+test_cfe_and_live_mutually_exclusive (test_all.TestMcpToLineCfe.test_cfe_and_live_mutually_exclusive) ... ok
+test_cfe_missing_file (test_all.TestMcpToLineCfe.test_cfe_missing_file) ... ok
+test_cfe_mode_valid (test_all.TestMcpToLineCfe.test_cfe_mode_valid) ... ok
+test_cfe_requires_ext_name (test_all.TestMcpToLineCfe.test_cfe_requires_ext_name) ... ok
+test_live_mode_requires_objects (test_all.TestMcpToLineCfe.test_live_mode_requires_objects) ... ok
+test_objects_rejected_in_cfe_mode (test_all.TestMcpToLineCfe.test_objects_rejected_in_cfe_mode) ... ok
+test_vendor_mismatch_diagnosis (test_all.TestMcpToLineCfe.test_vendor_mismatch_diagnosis)
+\u041f\u0438\u043b\u043e\u0442 04.11.2026: rc=101 �\u041d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d \u043e\u0431\u044a\u0435\u043a\u0442� � \u0432\u0435\u043d\u0434\u043e\u0440 \u043f\u0440\u0438\u0451\u043c\u043d\u0438\u043a\u0430 \u0447\u0443\u0436\u043e\u0439. ... ok
+test_clone_composes_children_and_types (test_all.TestMdClone.test_clone_composes_children_and_types) ... ok
+test_clone_rejects_deep_path_and_unknown_cls (test_all.TestMdClone.test_clone_rejects_deep_path_and_unknown_cls) ... ok
+test_filters (test_all.TestMdJournal.test_filters) ... ok
+test_missing_journal (test_all.TestMdJournal.test_missing_journal) ... ok
+test_read_all_and_tail (test_all.TestMdJournal.test_read_all_and_tail) ... ok
+test_get_set_roundtrip (test_all.TestModules.test_get_set_roundtrip) ... ok
+test_module_patch_ok (test_all.TestModules.test_module_patch_ok) ... ok
+test_module_patch_wrong_line_refused (test_all.TestModules.test_module_patch_wrong_line_refused) ... ok
+test_module_set_wrong_hash_refused (test_all.TestModules.test_module_set_wrong_hash_refused) ... ok
+test_md_check_refs_via_dump_dir (test_all.TestRefCheck.test_md_check_refs_via_dump_dir) ... ok
+test_no_refs (test_all.TestRefCheck.test_no_refs) ... ok
+test_refs_found_outside_own_subtree (test_all.TestRefCheck.test_refs_found_outside_own_subtree) ... ok
+test_unknown_kind_rejected (test_all.TestRefCheck.test_unknown_kind_rejected) ... ok
+test_all_tools_registered (test_all.TestServerBuild.test_all_tools_registered) ... ok
+test_broken_xml_rejected (test_all.TestStage15Forms.test_broken_xml_rejected) ... ok
+test_form_transfer (test_all.TestStage15Forms.test_form_transfer) ... ok
+test_forms_re_paths (test_all.TestStage15Forms.test_forms_re_paths) ... ok
+test_idempotent_second_call (test_all.TestStage15Forms.test_idempotent_second_call) ... ok
+test_module_removed_when_absent_in_cf2 (test_all.TestStage15Forms.test_module_removed_when_absent_in_cf2) ... ok
+test_no_cf1_original_rejected (test_all.TestStage15Forms.test_no_cf1_original_rejected) ... ok
+test_norm_form_xml_canon (test_all.TestStage15Forms.test_norm_form_xml_canon) ... ok
+test_norm_form_xml_vendor_type_refs (test_all.TestStage15Forms.test_norm_form_xml_vendor_type_refs)
+\u041f15-5: \u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u0430 \u0432 \u0432\u044b\u0433\u0440\u0443\u0437\u043a\u0435 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043d\u0438\u044f \u0440\u0430\u0437\u0432\u043e\u0440\u0430\u0447\u0438\u0432\u0430\u0435\u0442 \u0441\u0441\u044b\u043b\u043a\u0438 \u043d\u0430 \u0432\u0435\u043d\u0434\u043e\u0440\u0441\u043a\u0438\u0435 ... ok
+test_wrapper_not_adopted_rejected (test_all.TestStage15Forms.test_wrapper_not_adopted_rejected) ... ok
+test_slow_op_with_defaults_completes (test_bridge_configure.TestBridgeCallTimeouts.test_slow_op_with_defaults_completes) ... ok
+test_slow_op_with_per_op_override_times_out (test_bridge_configure.TestBridgeCallTimeouts.test_slow_op_with_per_op_override_times_out) ... ok
+test_no_args_changes_nothing (test_bridge_configure.TestBridgeConfigure.test_no_args_changes_nothing) ... ok
+test_note_mentions_restart (test_bridge_configure.TestBridgeConfigure.test_note_mentions_restart) ... ok
+test_updates_fields_preserving_existing_keys (test_bridge_configure.TestBridgeConfigure.test_updates_fields_preserving_existing_keys) ... ok
+test_validation_errors (test_bridge_configure.TestBridgeConfigure.test_validation_errors) ... ok
+test_whitelist_creates_missing_file (test_bridge_configure.TestBridgeConfigure.test_whitelist_creates_missing_file) ... ok
+test_whitelist_path_derived_from_root (test_bridge_configure.TestBridgeConfigure.test_whitelist_path_derived_from_root) ... ok
+test_whitelist_preserves_journal_section (test_bridge_configure.TestBridgeConfigure.test_whitelist_preserves_journal_section) ... ok
+test_whitelist_without_root_fails (test_bridge_configure.TestBridgeConfigure.test_whitelist_without_root_fails) ... ok
+test_bridge_balanced (test_bridge_configure.TestJsBalanceBridge.test_bridge_balanced) ... ok
+test_bridge_es3_syntax (test_bridge_configure.TestJsBalanceBridge.test_bridge_es3_syntax)
+ES3 (JScript 5): \u043d\u0438\u043a\u0430\u043a\u0438\u0445 let/const/\u0441\u0442\u0440\u0435\u043b\u043e\u043a � jsbalance \u0438\u0445 \u043d\u0435 \u043b\u043e\u0432\u0438\u0442. ... ok
+test_bad_per_op_value_ignored (test_bridge_configure.TestResolveTimeout.test_bad_per_op_value_ignored) ... ok
+test_builtin_long_ops (test_bridge_configure.TestResolveTimeout.test_builtin_long_ops) ... ok
+test_config_fields_defaults (test_bridge_configure.TestResolveTimeout.test_config_fields_defaults) ... ok
+test_custom_long_ops_extends_not_replaces (test_bridge_configure.TestResolveTimeout.test_custom_long_ops_extends_not_replaces) ... ok
+test_load_config_accepts_new_keys (test_bridge_configure.TestResolveTimeout.test_load_config_accepts_new_keys) ... ok
+test_load_config_rejects_bad_op_timeouts (test_bridge_configure.TestResolveTimeout.test_load_config_rejects_bad_op_timeouts) ... ok
+test_per_op_override_beats_long (test_bridge_configure.TestResolveTimeout.test_per_op_override_beats_long) ... ok
+test_per_op_override_on_plain_op (test_bridge_configure.TestResolveTimeout.test_per_op_override_on_plain_op) ... ok
+test_plain_op_uses_default (test_bridge_configure.TestResolveTimeout.test_plain_op_uses_default) ... ok
+test_build_definition_missing_raises (test_call_hierarchy.TestBuild.test_build_definition_missing_raises) ... ok
+test_build_with_definition (test_call_hierarchy.TestBuild.test_build_with_definition) ... ok
+test_matches_call_not_definition (test_call_hierarchy.TestCallPattern.test_matches_call_not_definition) ... ok
+test_groups_and_filters (test_call_hierarchy.TestGroupCalls.test_groups_and_filters) ... ok
+test_bad_objects_refused_before_any_step (test_cf_arbiter.TestArbiterRun.test_bad_objects_refused_before_any_step) ... ok
+test_differs_verdict_propagates (test_cf_arbiter.TestArbiterRun.test_differs_verdict_propagates) ... ok
+test_full_cycle_identical_and_cleanup (test_cf_arbiter.TestArbiterRun.test_full_cycle_identical_and_cleanup) ... ok
+test_keep_leaves_base (test_cf_arbiter.TestArbiterRun.test_keep_leaves_base) ... ok
+test_merge_failure_cleans_base (test_cf_arbiter.TestArbiterRun.test_merge_failure_cleans_base) ... ok
+test_missing_cf_refused (test_cf_arbiter.TestArbiterRun.test_missing_cf_refused) ... ok
+test_duplicates_refused (test_cf_arbiter.TestBuildMergeSettings.test_duplicates_refused) ... ok
+test_empty_refused (test_cf_arbiter.TestBuildMergeSettings.test_empty_refused) ... ok
+test_escaping (test_cf_arbiter.TestBuildMergeSettings.test_escaping) ... ok
+test_structure (test_cf_arbiter.TestBuildMergeSettings.test_structure) ... ok
+test_version_lowercase_in_raw_text (test_cf_arbiter.TestBuildMergeSettings.test_version_lowercase_in_raw_text) ... ok
+test_bare_name_refused (test_cf_arbiter.TestCheckObjects.test_bare_name_refused) ... ok
+test_empty_refused (test_cf_arbiter.TestCheckObjects.test_empty_refused) ... ok
+test_ok (test_cf_arbiter.TestCheckObjects.test_ok) ... ok
+test_subordinate_refused (test_cf_arbiter.TestCheckObjects.test_subordinate_refused) ... ok
+test_unknown_kind_refused (test_cf_arbiter.TestCheckObjects.test_unknown_kind_refused) ... ok
+test_error_rc2 (test_cf_arbiter.TestMain.test_error_rc2) ... ОТКАЗ: DESIGNER merge: DumpResult=1
+ok
+test_missing_cf_file_rc2 (test_cf_arbiter.TestMain.test_missing_cf_file_rc2) ... ОТКАЗ: cf не найден: C:\Users\RUNNER~1\AppData\Local\Temp\tmpdn59o7or\нет.cf
+ok
+test_no_source_of_objects_rc2 (test_cf_arbiter.TestMain.test_no_source_of_objects_rc2) ... ОТКАЗ: нужен --objects или --recdiff
+ok
+test_objects_mode_ok (test_cf_arbiter.TestMain.test_objects_mode_ok) ... ok
+test_recdiff_bare_names_refused_rc2 (test_cf_arbiter.TestMain.test_recdiff_bare_names_refused_rc2) ... ok
+test_recdiff_dotted_names_run (test_cf_arbiter.TestMain.test_recdiff_dotted_names_run) ... ok
+test_verdicts_nonzero_rc (test_cf_arbiter.TestMain.test_verdicts_nonzero_rc) ... ok
+test_bad_json_raises (test_cf_arbiter.TestParseRecdiffCandidates.test_bad_json_raises) ... ok
+test_max_n_cap (test_cf_arbiter.TestParseRecdiffCandidates.test_max_n_cap) ... ok
+test_names_deduped_and_ordered (test_cf_arbiter.TestParseRecdiffCandidates.test_names_deduped_and_ordered) ... ok
+test_service_names_never_returned (test_cf_arbiter.TestParseRecdiffCandidates.test_service_names_never_returned) ... рекдифф: 1 записей без разрешённого имени пропущено
+ok
+test_sibling_lookup (test_cf_arbiter.TestParseRecdiffCandidates.test_sibling_lookup) ... ok
+test_unresolvable_skipped (test_cf_arbiter.TestParseRecdiffCandidates.test_unresolvable_skipped) ... рекдифф: 1 записей без разрешённого имени пропущено
+ok
+test_ambiguous_name_refused (test_cf_arbiter.TestVerifyObjects.test_ambiguous_name_refused) ... ok
+test_identical (test_cf_arbiter.TestVerifyObjects.test_identical) ... ok
+test_mixed_verdicts (test_cf_arbiter.TestVerifyObjects.test_mixed_verdicts) ... ok
+test_cli_default_out_next_to_cf (test_cf_dump_json.TestCli.test_cli_default_out_next_to_cf) ... ok
+test_cli_hash (test_cf_dump_json.TestCli.test_cli_hash) ... ok
+test_cli_limit (test_cf_dump_json.TestCli.test_cli_limit)
+--limit N ограничивает число объектов в JSON-отчёте. ... ok
+test_cli_missing_cf_rc2 (test_cf_dump_json.TestCli.test_cli_missing_cf_rc2) ... cf_dump_json: C:\Users\RUNNER~1\AppData\Local\Temp\tmp53gv0fub\нет.cf
+ok
+test_cli_not_a_cf_rc2 (test_cf_dump_json.TestCli.test_cli_not_a_cf_rc2) ... cf_dump_json: не cf-контейнер v2: b'not a containern'
+ok
+test_cli_writes_json_rc0 (test_cf_dump_json.TestCli.test_cli_writes_json_rc0) ... ok
+test_hash_format (test_cf_dump_json.TestDumpHash.test_hash_format) ... ok
+test_hashes_are_sha1_of_payload (test_cf_dump_json.TestDumpHash.test_hashes_are_sha1_of_payload) ... ok
+test_no_hash_by_default (test_cf_dump_json.TestDumpSynthetic.test_no_hash_by_default) ... ok
+test_note_honest_limitation (test_cf_dump_json.TestDumpSynthetic.test_note_honest_limitation)
+(г) честное ограничение: структура реквизитов недоступна. ... ok
+test_service_records_not_in_objects (test_cf_dump_json.TestDumpSynthetic.test_service_records_not_in_objects)
+Служебные записи root/version/versions на ОБОИХ уровнях — в ... ok
+test_sorting (test_cf_dump_json.TestDumpSynthetic.test_sorting)
+(б) объекты отсортированы по name/uuid; безымянные — по uuid. ... ok
+test_structure_and_grouping (test_cf_dump_json.TestDumpSynthetic.test_structure_and_grouping)
+(а) группировка по uuid: suffix, размер из заголовка, имена. ... ok
+test_version_heuristic (test_cf_dump_json.TestDumpSynthetic.test_version_heuristic)
+(в) версия-эвристика из root-записи вложенного контейнера. ... ok
+test_all_versions_checked_one_drift_warns (test_doctor_drift.TestBridgeDrift.test_all_versions_checked_one_drift_warns)
+Несколько версий снегопата: проверяются ВСЕ; warn перечисляет ... ok
+test_cli_context_has_no_config_drift (test_doctor_drift.TestBridgeDrift.test_cli_context_has_no_config_drift)
+CLI-контекст (mcp_snegopat.server не импортирован): «дрейф конфига» ... ok
+test_deployed_differs_is_warn_with_md5_prefixes (test_doctor_drift.TestBridgeDrift.test_deployed_differs_is_warn_with_md5_prefixes) ... ok
+test_deployed_matches_repo_is_ok (test_doctor_drift.TestBridgeDrift.test_deployed_matches_repo_is_ok) ... ok
+test_drift_check_present_in_filesystem_checks (test_doctor_drift.TestBridgeDrift.test_drift_check_present_in_filesystem_checks) ... ok
+test_legacy_path_checked (test_doctor_drift.TestBridgeDrift.test_legacy_path_checked) ... ok
+test_no_deploy_is_note (test_doctor_drift.TestBridgeDrift.test_no_deploy_is_note) ... ok
+test_repo_missing_is_note (test_doctor_drift.TestBridgeDrift.test_repo_missing_is_note) ... ok
+test_verdict_not_worsened_by_note (test_doctor_drift.TestBridgeDrift.test_verdict_not_worsened_by_note)
+note не влияет на вердикт: пустой дом (нет deploy) — note, ... ok
+test_absent_file_keys_not_compared (test_doctor_drift.TestConfigDrift.test_absent_file_keys_not_compared)
+Поле, отсутствующее в файле, дрейфом не считается (runtime = умолчание ... ok
+test_bad_json_is_warn (test_doctor_drift.TestConfigDrift.test_bad_json_is_warn) ... ok
+test_differs_is_warn_named_fields (test_doctor_drift.TestConfigDrift.test_differs_is_warn_named_fields) ... ok
+test_env_file_missing_is_note (test_doctor_drift.TestConfigDrift.test_env_file_missing_is_note) ... ok
+test_nested_keys_presence_only (test_doctor_drift.TestConfigDrift.test_nested_keys_presence_only)
+op_timeouts/long_ops вложенно не читаются — только наличие ключа: ... ok
+test_no_env_is_note (test_doctor_drift.TestConfigDrift.test_no_env_is_note) ... ok
+test_same_scalars_is_ok (test_doctor_drift.TestConfigDrift.test_same_scalars_is_ok) ... ok
+test_detection_by_home_match (test_doctor_drift.TestRuntimeCfgDetection.test_detection_by_home_match) ... ok
+test_explicit_cfg_param_wins (test_doctor_drift.TestRuntimeCfgDetection.test_explicit_cfg_param_wins)
+run_filesystem_checks(cfg=...) добавляет «дрейф конфига» в MCP-блоке, ... ok
+test_no_server_module_returns_none (test_doctor_drift.TestRuntimeCfgDetection.test_no_server_module_returns_none) ... ok
+test_empty_password_omitted (test_enterprise_smoke.TestBuildCommand.test_empty_password_omitted) ... ok
+test_extra_args (test_enterprise_smoke.TestBuildCommand.test_extra_args) ... ok
+test_extra_args_quoted_path (test_enterprise_smoke.TestBuildCommand.test_extra_args_quoted_path) ... ok
+test_minimal (test_enterprise_smoke.TestBuildCommand.test_minimal) ... ok
+test_password_without_user_is_ignored (test_enterprise_smoke.TestBuildCommand.test_password_without_user_is_ignored) ... ok
+test_split_extra (test_enterprise_smoke.TestBuildCommand.test_split_extra) ... ok
+test_user_only (test_enterprise_smoke.TestBuildCommand.test_user_only) ... ok
+test_user_password (test_enterprise_smoke.TestBuildCommand.test_user_password) ... ok
+test_force_after_taskkill (test_enterprise_smoke.TestCloseSequence.test_force_after_taskkill) ... ok
+test_grace_wm_close (test_enterprise_smoke.TestCloseSequence.test_grace_wm_close) ... ok
+test_never_dies_reported (test_enterprise_smoke.TestCloseSequence.test_never_dies_reported) ... ok
+test_no_hwnd_skips_post (test_enterprise_smoke.TestCloseSequence.test_no_hwnd_skips_post) ... ok
+test_post_close_exception_not_fatal (test_enterprise_smoke.TestCloseSequence.test_post_close_exception_not_fatal) ... ok
+test_taskkill_without_force (test_enterprise_smoke.TestCloseSequence.test_taskkill_without_force) ... ok
+test_find_missing_root_clear_error (test_enterprise_smoke.TestPlatformAndFind.test_find_missing_root_clear_error) ... ok
+test_find_no_dir_clear_error (test_enterprise_smoke.TestPlatformAndFind.test_find_no_dir_clear_error) ... ok
+test_find_picks_newest (test_enterprise_smoke.TestPlatformAndFind.test_find_picks_newest) ... ok
+test_linux_refusal (test_enterprise_smoke.TestPlatformAndFind.test_linux_refusal) ... ok
+test_win32_ok (test_enterprise_smoke.TestPlatformAndFind.test_win32_ok) ... ok
+test_dir_without_1cd (test_enterprise_smoke.TestValidateBase.test_dir_without_1cd) ... ok
+test_missing_dir (test_enterprise_smoke.TestValidateBase.test_missing_dir) ... ok
+test_valid_base_returns_abspath (test_enterprise_smoke.TestValidateBase.test_valid_base_returns_abspath) ... ok
+test_missing_base_rejected_before_popen (test_enterprise_smoke.TestWindowsLaunchGuard.test_missing_base_rejected_before_popen) ... ok
+test_401_without_token (test_http_transport.TestAuthAsgi.test_401_without_token) ... ok
+test_401_wrong_token (test_http_transport.TestAuthAsgi.test_401_wrong_token) ... ok
+test_non_http_scope_passthrough (test_http_transport.TestAuthAsgi.test_non_http_scope_passthrough) ... ok
+test_pass_with_token (test_http_transport.TestAuthAsgi.test_pass_with_token) ... ok
+test_local_without_token_allowed (test_http_transport.TestGuard.test_local_without_token_allowed) ... ok
+test_refuse_remote_without_token (test_http_transport.TestGuard.test_refuse_remote_without_token) ... ok
+test_init_and_list_tools_with_token (test_http_transport.TestHttpE2E.test_init_and_list_tools_with_token) ... HTTP Request: POST http://127.0.0.1:50041/mcp "HTTP/1.1 200 OK"
+Received session ID: ef4e2f22de7649a7b984fb8417520457
+HTTP Request: POST http://127.0.0.1:50041/mcp "HTTP/1.1 202 Accepted"
+HTTP Request: GET http://127.0.0.1:50041/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://127.0.0.1:50041/mcp "HTTP/1.1 200 OK"
+HTTP Request: DELETE http://127.0.0.1:50041/mcp "HTTP/1.1 200 OK"
+ok
+test_wrong_token_rejected (test_http_transport.TestHttpE2E.test_wrong_token_rejected) ... HTTP Request: POST http://127.0.0.1:50052/mcp "HTTP/1.1 401 Unauthorized"
+ok
+test_local_variants (test_http_transport.TestLocalHost.test_local_variants) ... ok
+test_auth_token (test_http_transport.TestParseArgs.test_auth_token) ... ok
+test_http_bare (test_http_transport.TestParseArgs.test_http_bare) ... ok
+test_http_host_port (test_http_transport.TestParseArgs.test_http_host_port) ... ok
+test_no_http (test_http_transport.TestParseArgs.test_no_http) ... ok
+test_cli_create_delete_roundtrip (test_ib_query.TestIbMgmt.test_cli_create_delete_roundtrip)
+Живой CREATEINFOBASE + delete c confirm — полный круг на tmp-каталоге. ... skipped 'CREATEINFOBASE требует установленной платформы 1С (Windows)'
+test_cli_delete_no_confirm_is_plan (test_ib_query.TestIbMgmt.test_cli_delete_no_confirm_is_plan) ... ok
+test_delete_guard_non_ib_raises (test_ib_query.TestIbMgmt.test_delete_guard_non_ib_raises) ... ok
+test_plan_delete_missing_dir (test_ib_query.TestIbMgmt.test_plan_delete_missing_dir) ... ok
+test_plan_delete_refuses_non_ib (test_ib_query.TestIbMgmt.test_plan_delete_refuses_non_ib) ... ok
+test_plan_delete_warns_lock_and_own_bases (test_ib_query.TestIbMgmt.test_plan_delete_warns_lock_and_own_bases) ... ok
+test_cli_offline_clear_error (test_ib_query.TestQueryValidate.test_cli_offline_clear_error) ... ok
+test_live_bad_syntax (test_ib_query.TestQueryValidate.test_live_bad_syntax) ... skipped 'нет живой ИБ eventlog-tmp'
+test_live_check_ok (test_ib_query.TestQueryValidate.test_live_check_ok) ... skipped 'нет живой ИБ eventlog-tmp'
+test_validate_rejects_empty (test_ib_query.TestQueryValidate.test_validate_rejects_empty) ... ok
+test_validate_rejects_mode (test_ib_query.TestQueryValidate.test_validate_rejects_mode) ... ok
+test_wrap_first1 (test_ib_query.TestQueryValidate.test_wrap_first1) ... ok
+test_contains_counters_and_kind_breakdown (test_journal_dashboard.TestBuildDashboard.test_contains_counters_and_kind_breakdown) ... ok
+test_contains_filters_markup (test_journal_dashboard.TestBuildDashboard.test_contains_filters_markup) ... ok
+test_contains_object_names (test_journal_dashboard.TestBuildDashboard.test_contains_object_names) ... ok
+test_data_embedded_json (test_journal_dashboard.TestBuildDashboard.test_data_embedded_json) ... ok
+test_empty_journal (test_journal_dashboard.TestBuildDashboard.test_empty_journal) ... ok
+test_html_head_and_no_external_deps (test_journal_dashboard.TestBuildDashboard.test_html_head_and_no_external_deps) ... ok
+test_load_be_bom (test_journal_dashboard.TestLoadEntries.test_load_be_bom) ... ok
+test_load_le_bom (test_journal_dashboard.TestLoadEntries.test_load_le_bom) ... ok
+test_load_skips_empty_and_broken_lines (test_journal_dashboard.TestLoadEntries.test_load_skips_empty_and_broken_lines) ... ok
+test_main_creates_html (test_journal_dashboard.TestMain.test_main_creates_html) ... ok
+test_main_missing_journal_rc2 (test_journal_dashboard.TestMain.test_main_missing_journal_rc2) ... journal_dashboard: файл журнала не найден: C:\Users\RUNNER~1\AppData\Local\Temp\нет_такого_журнала_12345.jsonl
+ok
+test_doubled_quote_marker_is_not_string_start (test_md_search.TestFormModuleRecord.test_doubled_quote_marker_is_not_string_start)
+«""#Область…» внутри чужой строки — не начало модуля, хитов нет. ... ok
+test_form_module_hit_unescaped (test_md_search.TestFormModuleRecord.test_form_module_hit_unescaped)
+Хит в модуле формы: src="form", кавычки разэкранированы, ... ok
+test_form_needle_with_quotes (test_md_search.TestFormModuleRecord.test_form_needle_with_quotes)
+needle с кавычками находит по РАЗЭКРАНИРОВАННОМУ тексту ... ok
+test_form_record_has_no_text_pages (test_md_search.TestFormModuleRecord.test_form_record_has_no_text_pages) ... ok
+test_page_and_form_in_one_record (test_md_search.TestFormModuleRecord.test_page_and_form_in_one_record)
+Запись и со страницей text, и с quoted-модулем формы: оба хита, ... ok
+test_create_element_hit (test_md_search.TestLiveProbeCf.test_create_element_hit)
+«Сообщить("Создание элемента» → Эмитенты, запись 4c050b66…0, строка 2. ... skipped 'probe-cf отсутствует (чистка backups)'
+test_no_false_hits_in_emptied_modules (test_md_search.TestLiveProbeCf.test_no_false_hits_in_emptied_modules)
+Модули, опустевшие в сохранённой конфигурации (size=3), не дают ... skipped 'probe-cf отсутствует (чистка backups)'
+test_regex_several_objects (test_md_search.TestLiveProbeCf.test_regex_several_objects)
+--regex 'Сообщить\(' — попадания в нескольких объектах. ... skipped 'probe-cf отсутствует (чистка backups)'
+test_vendor_module_hit (test_md_search.TestLiveProbeCf.test_vendor_module_hit)
+«Сумма расчёта» → вендорский модуль РасчётСКлиентом (имя из карты). ... skipped 'probe-cf отсутствует (чистка backups)'
+test_form_skeleton_hit_and_attribution (test_md_search.TestLiveProbeCfForms.test_form_skeleton_hit_and_attribution) ... skipped 'probe-cf отсутствует (чистка backups)'
+test_object_module_hit_is_page_src (test_md_search.TestLiveProbeCfForms.test_object_module_hit_is_page_src)
+Обычный модуль объекта: src="page", form_record не проставляется. ... skipped 'probe-cf отсутствует (чистка backups)'
+test_case_insensitive (test_md_search.TestSearchRecordSynthetic.test_case_insensitive)
+(в) поиск без учёта регистра (кириллица и латиница). ... ok
+test_exact_substring_line_number_crlfcr (test_md_search.TestSearchRecordSynthetic.test_exact_substring_line_number_crlfcr)
+(а) точная подстрока — правильный номер строки (разделитель \r\r\n). ... ok
+test_hit_outside_text_page_rejected (test_md_search.TestSearchRecordSynthetic.test_hit_outside_text_page_rejected)
+(б) попадание вне страницы text отбрасывается (info-страница, ... ok
+test_line_numbers_lf_quirk (test_md_search.TestSearchRecordSynthetic.test_line_numbers_lf_quirk)
+(а) тот же номер строки при разделителе \r\n (вендорский модуль). ... ok
+test_max_hits_cap (test_md_search.TestSearchRecordSynthetic.test_max_hits_cap) ... ok
+test_multiple_text_pages (test_md_search.TestSearchRecordSynthetic.test_multiple_text_pages)
+Два блока text в одной записи: каждая страница нумерует строки с 1. ... ok
+test_no_hits_without_text_marker (test_md_search.TestSearchRecordSynthetic.test_no_hits_without_text_marker) ... ok
+test_regex_mode (test_md_search.TestSearchRecordSynthetic.test_regex_mode)
+(г) regex-режим: несколько попаданий с верными строками. ... ok
+test_call_sites_invalid_name (test_module_structure.TestModuleStructure.test_call_sites_invalid_name)
+Пустое/не идентификатор имя и неизвестное имя — без результатов. ... ok
+test_comment_with_word_procedure (test_module_structure.TestModuleStructure.test_comment_with_word_procedure)
+(б) «Процедура» в комментарии/литерале не создаёт блок. ... ok
+test_declaration_without_name_skipped (test_module_structure.TestModuleStructure.test_declaration_without_name_skipped)
+Токен без имени («Процедура (х)») — не блок. ... ok
+test_declaration_without_paren_skipped (test_module_structure.TestModuleStructure.test_declaration_without_paren_skipped)
+«Функция» без «(» и «Процедуры...» без границы слова — не блоки. ... ok
+test_directives_with_gaps (test_module_structure.TestModuleStructure.test_directives_with_gaps)
+Директива привязывается через комментарии и пустые строки. ... ok
+test_function_and_call_sites (test_module_structure.TestModuleStructure.test_function_and_call_sites)
+(в) find_call_sites находит вызовы и не считает объявление вызовом. ... ok
+test_lf_only_eol (test_module_structure.TestModuleStructure.test_lf_only_eol)
+(г) LF-only EOL разбирается так же, как CRLF; номера строк те же. ... ok
+test_params_string_default_with_paren (test_module_structure.TestModuleStructure.test_params_string_default_with_paren)
+Литерал с «)» в значении по умолчанию не рвёт список параметров. ... ok
+test_two_procedures (test_module_structure.TestModuleStructure.test_two_procedures)
+(а) line_start/line_end/directives/export/params двух процедур. ... ok
+test_unclosed_block (test_module_structure.TestModuleStructure.test_unclosed_block)
+(д) незакрытый блок — line_end=None, директивы и параметры на месте. ... ok
+test_all_presets_subset_of_tools (test_presets.TestApplyPresets.test_all_presets_subset_of_tools) ... ok
+test_analysis_subset_is_read_only (test_presets.TestApplyPresets.test_analysis_subset_is_read_only) ... ok
+test_meta_includes_write_and_keeps_read (test_presets.TestApplyPresets.test_meta_includes_write_and_keeps_read) ... ok
+test_no_presets_returns_all (test_presets.TestApplyPresets.test_no_presets_returns_all) ... ok
+test_union_of_presets (test_presets.TestApplyPresets.test_union_of_presets) ... ok
+test_unknown_preset_rejected (test_presets.TestApplyPresets.test_unknown_preset_rejected) ... ok
+test_build_server_with_preset (test_presets.TestBuildServerPresets.test_build_server_with_preset) ... <string>:2: ResourceWarning: unclosed <socket.socket fd=1028, family=2, type=1, proto=6, laddr=('127.0.0.1', 50055), raddr=('127.0.0.1', 50052)>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\asyncio\proactor_events.py:116: ResourceWarning: unclosed transport <_ProactorSocketTransport fd=-1 read=<_OverlappedFuture cancelled>>
+  _warn(f"unclosed transport {self!r}", ResourceWarning, source=self)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\asyncio\proactor_events.py:116: ResourceWarning: unclosed transport <_ProactorSocketTransport fd=1128 read=<_OverlappedFuture cancelled>>
+  _warn(f"unclosed transport {self!r}", ResourceWarning, source=self)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_build_server_without_presets_all (test_presets.TestBuildServerPresets.test_build_server_without_presets_all) ... ok
+test_bad_chars_rejected (test_readonly_synonyms.TestMultilangSynonyms.test_bad_chars_rejected) ... ok
+test_en_only (test_readonly_synonyms.TestMultilangSynonyms.test_en_only) ... ok
+test_md_set_synonym_with_synonyms_param (test_readonly_synonyms.TestMultilangSynonyms.test_md_set_synonym_with_synonyms_param) ... ok
+test_ru_en_dict (test_readonly_synonyms.TestMultilangSynonyms.test_ru_en_dict) ... ok
+test_ru_str_backward_compatible (test_readonly_synonyms.TestMultilangSynonyms.test_ru_str_backward_compatible) ... ok
+test_unknown_lang_rejected (test_readonly_synonyms.TestMultilangSynonyms.test_unknown_lang_rejected) ... ok
+test_compositions_covered (test_readonly_synonyms.TestReadOnlyPreset.test_compositions_covered)
+md_clone/md_rename идут через гейтнутые op — автоматически запрещены. ... ok
+test_config_key_parsed (test_readonly_synonyms.TestReadOnlyPreset.test_config_key_parsed) ... ok
+test_read_ops_allowed_in_readonly (test_readonly_synonyms.TestReadOnlyPreset.test_read_ops_allowed_in_readonly) ... ok
+test_write_ops_forbidden_in_readonly (test_readonly_synonyms.TestReadOnlyPreset.test_write_ops_forbidden_in_readonly) ... ok
+test_cascade_requires_dump (test_ref_rewrite.TestMdRenameCascade.test_cascade_requires_dump) ... ok
+test_cascade_rewrites_module_with_hash_guard (test_ref_rewrite.TestMdRenameCascade.test_cascade_rewrites_module_with_hash_guard) ... ok
+test_delete_comment_requires_dump (test_ref_rewrite.TestMdRenameCascade.test_delete_comment_requires_dump) ... ok
+test_delete_literal_action_comment (test_ref_rewrite.TestMdRenameCascade.test_delete_literal_action_comment)
+№17 завершение: md_delete literal_action=comment — строки с литералами ... ok
+test_no_cascade_notes (test_ref_rewrite.TestMdRenameCascade.test_no_cascade_notes) ... ok
+test_catalog_and_processor (test_ref_rewrite.TestRewriteRefs.test_catalog_and_processor) ... ok
+test_common_module_bare_name_guarded (test_ref_rewrite.TestRewriteRefs.test_common_module_bare_name_guarded) ... ok
+test_document_all_literals (test_ref_rewrite.TestRewriteRefs.test_document_all_literals) ... ok
+test_unknown_kind (test_ref_rewrite.TestRewriteRefs.test_unknown_kind) ... ok
+test_synthetic_dump (test_ref_rewrite.TestTargetsFromDump.test_synthetic_dump) ... ok
+test_failed_run_rc1 (test_renovate_ext.TestMain.test_failed_run_rc1) ... ok
+test_missing_args_rc2 (test_renovate_ext.TestMain.test_missing_args_rc2) ... ok
+test_missing_cf_file_rc2 (test_renovate_ext.TestMain.test_missing_cf_file_rc2) ... ok
+test_name_prefix_flow_to_artifact (test_renovate_ext.TestMain.test_name_prefix_flow_to_artifact) ... ok
+test_ok_run_rc0 (test_renovate_ext.TestMain.test_ok_run_rc0) ... ok
+test_arbiter_rc1_is_not_fail_disputed (test_renovate_ext.TestPipelineArbiterVerdicts.test_arbiter_rc1_is_not_fail_disputed) ... ok
+test_arbiter_rc2_skipped_with_note (test_renovate_ext.TestPipelineArbiterVerdicts.test_arbiter_rc2_skipped_with_note) ... ok
+test_no_candidates_skips_arbiter (test_renovate_ext.TestPipelineArbiterVerdicts.test_no_candidates_skips_arbiter) ... ok
+test_cleanup_keeps_reports_and_artifact (test_renovate_ext.TestPipelineCleanup.test_cleanup_keeps_reports_and_artifact) ... ok
+test_keep_true_preserves_heavy (test_renovate_ext.TestPipelineCleanup.test_keep_true_preserves_heavy) ... ok
+test_diff_failed_stops_pipeline (test_renovate_ext.TestPipelineFailFast.test_diff_failed_stops_pipeline) ... ok
+test_recdiff_failed_stops_everything (test_renovate_ext.TestPipelineFailFast.test_recdiff_failed_stops_everything) ... ok
+test_build_ext_ok_without_cfe_file_is_failed (test_renovate_ext.TestPipelineGuards.test_build_ext_ok_without_cfe_file_is_failed) ... ok
+test_callable_fakes_supported (test_renovate_ext.TestPipelineGuards.test_callable_fakes_supported) ... ok
+test_missing_cf_raises (test_renovate_ext.TestPipelineGuards.test_missing_cf_raises) ... ok
+test_full_ok_run (test_renovate_ext.TestPipelineOkRun.test_full_ok_run) ... ok
+test_no_silent_skips_details_present (test_renovate_ext.TestPipelineOkRun.test_no_silent_skips_details_present) ... ok
+test_build_ext_and_arbiter_skipped_without_platform (test_renovate_ext.TestPipelineSkipped.test_build_ext_and_arbiter_skipped_without_platform) ... ok
+test_identical_short_circuit (test_renovate_ext.TestPipelineSkipped.test_identical_short_circuit) ... ok
+test_recdiff_real_identical_pair (test_renovate_ext.TestRealRecdiffStep.test_recdiff_real_identical_pair) ... FAIL
+test_recdiff_real_on_synthetic_cf (test_renovate_ext.TestRealRecdiffStep.test_recdiff_real_on_synthetic_cf) ... FAIL
+test_md_to_html_code_block (test_search_live_blog.TestBlogPublish.test_md_to_html_code_block) ... ok
+test_md_to_html_headings_lists (test_search_live_blog.TestBlogPublish.test_md_to_html_headings_lists) ... ok
+test_publish_requires_creds (test_search_live_blog.TestBlogPublish.test_publish_requires_creds) ... D:\a\mcp-onec-configurator\mcp-onec-configurator\server\tools\blog_publish.py:45: ResourceWarning: unclosed file <_io.TextIOWrapper name='C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\tmp1mhdme_q\\env.env' mode='r' encoding='utf-8'>
+  for line in io.open(path, encoding='utf-8'):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_publish_requires_file (test_search_live_blog.TestBlogPublish.test_publish_requires_file) ... ok
+test_slugify_cyrillic (test_search_live_blog.TestBlogPublish.test_slugify_cyrillic) ... ok
+test_slugify_empty_raises (test_search_live_blog.TestBlogPublish.test_slugify_empty_raises) ... ok
+test_find_needle_basic (test_search_live_blog.TestSearchLive.test_find_needle_basic) ... ok
+test_find_needle_max_hits (test_search_live_blog.TestSearchLive.test_find_needle_max_hits) ... ok
+test_find_needle_regex_digits (test_search_live_blog.TestSearchLive.test_find_needle_regex_digits) ... ok
+test_forms_note_honest (test_search_live_blog.TestSearchLiveLive.test_forms_note_honest) ... ok
+test_object_module_hit (test_search_live_blog.TestSearchLiveLive.test_object_module_hit) ... ok
+test_cli_dict_wrapper_accepted (test_spec_check.TestSpecCheckCli.test_cli_dict_wrapper_accepted) ... ok
+test_cli_rc0_all_ok (test_spec_check.TestSpecCheckCli.test_cli_rc0_all_ok) ... ok
+test_cli_rc1_missing (test_spec_check.TestSpecCheckCli.test_cli_rc1_missing) ... ok
+test_cli_rc2_bad_spec (test_spec_check.TestSpecCheckCli.test_cli_rc2_bad_spec) ... ok
+test_cli_rc2_bad_spec_shape (test_spec_check.TestSpecCheckCli.test_cli_rc2_bad_spec_shape) ... ok
+test_cli_rc2_bridge_unreachable (test_spec_check.TestSpecCheckCli.test_cli_rc2_bridge_unreachable) ... ok
+test_cli_rc2_invalid_json (test_spec_check.TestSpecCheckCli.test_cli_rc2_invalid_json) ... ok
+test_claim_without_objects (test_spec_check.TestVerifyClaims.test_claim_without_objects) ... ok
+test_existing_object_ok (test_spec_check.TestVerifyClaims.test_existing_object_ok) ... ok
+test_impact_objects_in_claim_not_warning (test_spec_check.TestVerifyClaims.test_impact_objects_in_claim_not_warning) ... ok
+test_impact_via_stubbed_md_search_code (test_spec_check.TestVerifyClaims.test_impact_via_stubbed_md_search_code) ... ok
+test_missing_object (test_spec_check.TestVerifyClaims.test_missing_object) ... ok
+test_no_cf_impact_note (test_spec_check.TestVerifyClaims.test_no_cf_impact_note) ... ok
+test_no_live_session_honest_refusal (test_spec_check.TestVerifyClaims.test_no_live_session_honest_refusal) ... ok
+test_queries_with_stubbed_validator (test_spec_check.TestVerifyClaims.test_queries_with_stubbed_validator) ... ok
+test_queries_without_base_noted (test_spec_check.TestVerifyClaims.test_queries_without_base_noted) ... ok
+test_registry_dedup_across_claims (test_spec_check.TestVerifyClaims.test_registry_dedup_across_claims) ... ok
+test_short_name_skips_similar (test_spec_check.TestVerifyClaims.test_short_name_skips_similar) ... ok
+test_similar_by_synonym (test_spec_check.TestVerifyClaims.test_similar_by_synonym) ... ok
+test_similar_finds_candidates (test_spec_check.TestVerifyClaims.test_similar_finds_candidates) ... ok
+test_unknown_kind_no_crash (test_spec_check.TestVerifyClaims.test_unknown_kind_no_crash) ... ok
+test_build_config (test_yaxunit.TestYaxunit.test_build_config) ... ok
+test_cli_offline_clear_error (test_yaxunit.TestYaxunit.test_cli_offline_clear_error) ... ok
+test_parse_junit (test_yaxunit.TestYaxunit.test_parse_junit) ... ok
+test_run_rejects_missing_base (test_yaxunit.TestYaxunit.test_run_rejects_missing_base) ... ok
+
+======================================================================
+FAIL: test_recdiff_real_identical_pair (test_renovate_ext.TestRealRecdiffStep.test_recdiff_real_identical_pair)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\a\mcp-onec-configurator\mcp-onec-configurator\server\tests\test_renovate_ext.py", line 355, in test_recdiff_real_identical_pair
+    self.assertEqual(rec["status"], "ok",
+AssertionError: 'failed' != 'ok'
+- failed
++ ok
+ : {"status": "failed", "detail": "cf_recdiff: rc=1 (ожидается 0=идентичны или 2=есть различия; см. work/recdiff.*.log)", "last_error": "cf_recdiff: rc=1 (ожидается 0=идентичны или 2=есть различия; см. work/recdiff.*.log)", "stdout_tail": "", "stderr_tail": "41\\u0435\\u0439: {res['records1']} vs {res['records2']}\")\n  File \"C:\\hostedtoolcache\\windows\\Python\\3.12.10\\x64\\Lib\\encodings\\cp1252.py\", line 19, in encode\n    return codecs.charmap_encode(input,self.errors,encoding_table)[0]\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nUnicodeEncodeError: 'charmap' codec can't encode characters in position 0-6: character maps to <undefined>\n"}
+
+======================================================================
+FAIL: test_recdiff_real_on_synthetic_cf (test_renovate_ext.TestRealRecdiffStep.test_recdiff_real_on_synthetic_cf)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\a\mcp-onec-configurator\mcp-onec-configurator\server\tests\test_renovate_ext.py", line 336, in test_recdiff_real_on_synthetic_cf
+    self.assertEqual(rep["steps"][0]["status"], "ok",
+AssertionError: 'failed' != 'ok'
+- failed
++ ok
+ : {"step": "recdiff", "status": "failed", "elapsed_s": 0.08, "detail": "cf_recdiff: rc=1 (ожидается 0=идентичны или 2=есть различия; см. work/recdiff.*.log)", "attempts": 1, "last_error": "cf_recdiff: rc=1 (ожидается 0=идентичны или 2=есть различия; см. work/recdiff.*.log)"}
+
+----------------------------------------------------------------------
+Ran 375 tests in 12.035s
+
+FAILED (failures=2, skipped=14)
+{"out": "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\tmp3x_9mavv\\777-dashboard.html", "entries": 4}
+{"out": "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\tmp3x_9mavv\\custom.html", "entries": 4}
