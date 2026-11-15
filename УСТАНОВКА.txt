@@ -1,0 +1,46 @@
+﻿ПОСТАВКА mcp-configurator v1.1.0 (05.11.2026)
+
+Состав:
+  install.ps1          — установщик (PowerShell, прав админа не требует)
+  snegopat-x64/        — Снегопат 1.6.43, модифицированная сборка (мост включён,
+                         std/main.js + addins/mcp/mcp_bridge.js 1.1, Libs/winapi.js)
+  mcp-configurator/    — проект: MCP-сервер (44 инструмента), мост (исходник),
+                         пакетные инструменты cf (build_ext, cf_diff, ref_check,
+                         mcp_to_line, mockup_init, form_xml), тесты, доки этапов
+  bin/                 — DynamicWrapperX 2.2.0.0 (dynwrapx.dll x64 + dynwrapx32.dll
+                         x86 + справка DWX-Help_Ru.chm)
+  README.md, RELEASE_NOTES.md, РУКОВОДСТВО-АДМИНИСТРАТОРА.md,
+  РУКОВОДСТВО-ПОЛЬЗОВАТЕЛЯ.md — документация (руководства и памятка также в Word:
+  РУКОВОДСТВО-*.docx, УСТАНОВКА.docx — в корне поставки)
+
+Требования:
+  Windows 10+; платформа 1С 8.3.27.2074 (C:\Program Files\1cv8\8.3.27.2074);
+  Python >= 3.11 в PATH (для pip install -e server нужен доступ к PyPI);
+  целевой диск Y: (мост жёстко пишет в Y:\Snegopat-mcp\mcp); путь без кириллицы.
+
+Установка (из корня распакованной поставки):
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File install.ps1
+Ключи: -Drive Y | -SkipPip | -SkipSnegopat
+
+Установщик: проверяет платформу/Python/диск, ставит Снегопат (прежде существующая
+сборка уезжает в x64-backup-<штамп>), создаёт каталоги моста и флаг включения,
+создаёт конфиг сервера (допишите свои базы в own_bases), регистрирует DynamicWrapperX
+per-user (HKCU, без админа), копирует проект, делает pip install -e server,
+запускает стартер (резидентный инжектор, cwd = x64 — важно).
+
+Дальше вручную (подсказки печатает установщик):
+  1. ZCode -> ~/.zcode/cli/config.json -> mcp.servers -> "mcp-snegopat": {"command": "mcp-snegopat"}
+  2. own_bases в Y:\Snegopat-mcp\mcp\mcp_snegopat.json
+  3. Живой запуск конфигуратора: строго 1cv8.exe DESIGNER /F <база>
+     (без слова DESIGNER откроется лаунчер «Запуск 1С:Предприятия» и повиснет).
+  4. Проверка: list_sessions в ZCode при открытом конфигураторе -> мост 1.1.
+
+Что умеет (полностью — README.md, RELEASE_NOTES.md):
+  - конвейер «расширение из сравнения двух cf» одной командой (ext_build_from_cf):
+    изменённые модули -> перехватчики, реквизиты, замещающие формы (полный контент),
+    новые объекты -> own-объекты с префиксом; верификации: вендор цел, CheckModules,
+    постусловия; идемпотентен (cfe байт-в-байт при повторах);
+  - доставка cfe в базу линии (mcp_to_line --cfe) с постусловием хешей;
+  - поиск ссылок перед удалением (md_check_refs);
+  - журнал правок метаданных «human/agent» (md_journal);
+  - живой конфигуратор: метаданные, модули, формы (XML), расширения, хранилище.
