@@ -1,0 +1,170 @@
+{
+ "steps": [
+  {
+   "step": "list_sessions",
+   "ok": true,
+   "ms": 1
+  },
+  {
+   "step": "session_info",
+   "ok": true,
+   "ms": 85
+  },
+  {
+   "step": "config_open",
+   "ok": true,
+   "ms": 273
+  },
+  {
+   "step": "session_info_after_open",
+   "ok": true,
+   "ms": 65
+  },
+  {
+   "step": "md_counts",
+   "ok": true,
+   "ms": 149
+  },
+  {
+   "step": "md_tree_root",
+   "ok": true,
+   "ms": 147
+  },
+  {
+   "step": "md_walk",
+   "ok": true,
+   "ms": 148
+  },
+  {
+   "step": "md_add_child: справочник",
+   "ok": true,
+   "ms": 858
+  },
+  {
+   "step": "md_object: справочник",
+   "ok": true,
+   "ms": 128
+  },
+  {
+   "step": "module_get",
+   "ok": true,
+   "ms": 107
+  },
+  {
+   "step": "module_set",
+   "ok": true,
+   "ms": 254
+  },
+  {
+   "step": "module_get_after_set",
+   "ok": true,
+   "ms": 85
+  },
+  {
+   "step": "module_patch",
+   "ok": true,
+   "ms": 149
+  },
+  {
+   "step": "module_set_wrong_hash_refused",
+   "ok": true,
+   "ms": 465
+  },
+  {
+   "step": "md_set_property: комментарий",
+   "ok": true,
+   "ms": 168
+  },
+  {
+   "step": "md_add_child: реквизит",
+   "ok": true,
+   "ms": 961
+  },
+  {
+   "step": "md_set_type: строка 50",
+   "ok": false,
+   "ms": 149,
+   "error": "AssertionError: проверка не прошла: тип {'internal': '{\"#\",f5c65050-3bbb-11d5-b988-0050bae0a95d,\\n{\"Pattern\",\\n{\"S\",50,1}\\n}\\n}'}",
+   "where": null
+  },
+  {
+   "step": "md_children: реквизиты",
+   "ok": true,
+   "ms": 128
+  },
+  {
+   "step": "md_find: Мср",
+   "ok": false,
+   "ms": 169,
+   "error": "AssertionError: проверка не прошла: не найден",
+   "where": null
+  },
+  {
+   "step": "syntax_check",
+   "ok": true,
+   "ms": 406
+  },
+  {
+   "step": "md_delete: реквизит",
+   "ok": true,
+   "ms": 749
+  },
+  {
+   "step": "md_delete: справочник",
+   "ok": true,
+   "ms": 958
+  },
+  {
+   "step": "config_save (автоархив)",
+   "ok": true,
+   "ms": 445
+  },
+  {
+   "step": "raw: идемпотентность по id",
+   "ok": true,
+   "replayed": [
+    0,
+    1
+   ],
+   "done": [
+    40,
+    41
+   ]
+  },
+  {
+   "step": "raw: 6 битых запросов -> мост жив",
+   "ok": true
+  },
+  {
+   "step": "raw: deadline",
+   "ok": true
+  },
+  {
+   "step": "raw: unknown_op",
+   "ok": true
+  },
+  {
+   "step": "bridge_stats",
+   "ok": true,
+   "ms": 148
+  }
+ ],
+ "failures": [
+  "md_set_type: строка 50",
+  "md_find: Мср"
+ ],
+ "pid": 9068,
+ "modules_of_catalog": [
+  {
+   "prop": "МодульОбъекта",
+   "hash": "811c9dc5",
+   "lines": 0
+  },
+  {
+   "prop": "МодульМенеджера",
+   "hash": "811c9dc5",
+   "lines": 0
+  }
+ ],
+ "archive": "Y:\\Snegopat-mcp\\backups\\mcp-20261024-004006.cf"
+}

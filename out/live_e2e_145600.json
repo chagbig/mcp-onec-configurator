@@ -1,0 +1,14 @@
+{
+ "steps": [
+  {
+   "step": "list_sessions",
+   "ok": false,
+   "ms": 3,
+   "error": "AssertionError: проверка не прошла: нет живых сессий",
+   "where": null
+  }
+ ],
+ "failures": [
+  "list_sessions"
+ ]
+}

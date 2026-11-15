@@ -1,0 +1,15 @@
+# CI mcp-configurator: юнит-тесты (без конфигуратора — подставной мост, файловый).
+# Платформенных вызовов в тестах нет; пакет win-специфичен только в рантайме
+# (мост/конфигуратор), поэтому контейнер Linux подходит.
+stages:
+  - test
+
+unit-tests:
+  stage: test
+  image: python:3.12
+  script:
+    - pip install -e server
+    - python -m unittest discover -s server/tests -p "test_all.py" -v
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
