@@ -1,0 +1,2364 @@
+﻿//engine: JScript
+//uname: mcp_bridge
+//dname: MCP: мост конфигуратора
+//descr: Мост MCP для живого конфигуратора (проект mcp-configurator, этапы 2-5). Фиксированный список операций, без исполнения произвольного кода. Работает только при наличии mcp_bridge.on (инвариант 8 плана).
+//addin: global
+
+// Протокол (транспорт A, план §4.2), каталоги — ПО СЕССИИ, чтобы два открытых конфигуратора
+// не перехватывали запросы друг друга:
+//   sessions\<pid>\req\<id>.json   {op, args, deadline}   — кладёт MCP-сервер (атомарно: .tmp -> rename)
+//   sessions\<pid>\resp\<id>.json  {id, ok, result | error{code, message, where}, ms, tick}
+//   sessions\<pid>\session.json    — реестр сессии: контейнеры, heartbeat, running, stat
+//   mcp_bridge.on — файл включения у корня (инвариант 8)
+// Исполнение только из тика таймера, только при !busy и windows.modalMode == 0 (инвариант 2).
+// Повтор id возвращает прежний ответ из кэша (идемпотентность, план §4.2).
+// Долгие операции помечаются running в сессии; ответ появляется по завершении — таймаут клиента
+// не означает «не выполнено» (план §4.2).
+
+global.connectGlobals(SelfScript);
+
+// ---------- конфигурация ----------
+
+// Пути НЕ захардкожены (v1.2): дом определяется (1) env MCP_SNEGOPAT_HOME,
+// (2) walk-up от каталога аддина до маркера mcp\mcp_bridge.home (ставит установщик),
+// (3) аварийно C:\Snegopat-mcp (session_info покажет home — маркера там не будет).
+var fso = new ActiveXObject("Scripting.FileSystemObject");
+var HOME = "";
+(function findHome() {
+    try {
+        var sh = new ActiveXObject("WScript.Shell");
+        HOME = String(sh.Environment("PROCESS")("MCP_SNEGOPAT_HOME") || "")
+            || String(sh.Environment("USER")("MCP_SNEGOPAT_HOME") || "");
+    } catch (e0) { HOME = ""; }
+    if (!HOME) {
+        var fp = "";
+        try { fp = String(SelfScript.fullPath); } catch (e1) {}
+        var dir = fp.replace(/[\\\/][^\\\/]*$/, "");
+        for (var i = 0; i < 8 && dir; i++) {
+            if (fso.FileExists(dir + "\\mcp\\mcp_bridge.home")) { HOME = dir; break; }
+            dir = dir.replace(/[\\\/][^\\\/]+$/, "");
+        }
+    }
+    if (!HOME) HOME = "C:\\Snegopat-mcp";
+    // маркер загрузки: всегда (диагностика «аддин не загрузился/дом не тот»)
+    try {
+        if (!fso.FolderExists(HOME + "\\mcp")) fso.CreateFolder(HOME + "\\mcp");
+        writeUtf8Atomic(HOME + "\\mcp\\mcp_bridge-load.txt",
+            "loaded " + new Date().getTime() + " pid=" + myPid + " home=" + HOME);
+    } catch (eTrace) {}
+})();
+var ROOT = HOME + "\\mcp\\";
+var TIMER_MS = 150;
+var RESP_CACHE_MAX = 256;
+var ENABLE_FILE = ROOT + "mcp_bridge.on";
+var SESSION_DIR = ROOT + "sessions\\" + Designer.processId() + "\\";
+var REQ_DIR = SESSION_DIR + "req\\";
+var RESP_DIR = SESSION_DIR + "resp\\";
+var BACKUPS_DIR = HOME + "\\backups\\";
+var FORMS_DIR = ROOT + "forms\\";
+var JOURNAL_DIR = ROOT + "journal\\";
+var MD_KINDS = ["AddChild", "PropChanged", "DeleteChild", "Changed", "Save", "Close", "AfterSave"];
+var journalFile = JOURNAL_DIR + Designer.processId() + ".jsonl";
+var journalCount = 0;
+// журнал настраивается файлом <mcp>\mcp_bridge.cfg.json (пишет journal_configure,
+// применяет мост: читает при старте + перечитывает по mtime на каждом событии)
+var journalCfg = { enabled: true, kinds: [], maxFileMB: 20, keepFiles: 3 };
+var journalCfgStamp = "";
+var BRIDGE_VERSION = "1.3.9";
+
+// Операции, помечаемые running в сессии (план §4.2: долгие блокируют мост на минуты)
+var LONG_OPS = {
+    config_open: 1, cfg_archive_cf: 1, config_save: 1, syntax_check: 1,
+    update_db_cfg: 1, cfgstore_capture: 1, cfgstore_commit: 1
+};
+
+var CFG_GROUP = "{F10CBB81-F679-11D4-9DD3-0050BAE2BC79}";
+var STG_GROUP = "{5679B714-7E65-4ED4-92BF-6DDD604C6EA3}";
+
+var busy = false;
+var timerId = 0;
+// белые списки путей cf (v1.2: от HOME, не от буквы диска); строится после HOME
+var CF_PATH_RE = new RegExp("^" + HOME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    + "\\\\(backups|verify)\\\\[A-Za-z0-9_.\\-\\\\]+\\.cf$");
+var CF_BACKUP_RE = new RegExp("^" + HOME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    + "\\\\backups\\\\[A-Za-z0-9_.\\-]+\\.cf$");
+var stat = { ticks: 0, ticksInModal: 0, ticksBusy: 0, done: 0, replayed: 0, errors: 0, lastError: null, startedAt: new Date().getTime() };
+var myPid = Designer.processId();
+var sessionFile = SESSION_DIR + "session.json";
+var running = null;      // {id, op, startedAt} пока выполняется долгая операция
+var respCache = {};      // id -> текст ответа (идемпотентность)
+var respCacheOrder = []; // порядок вставки для вытеснения
+
+// ---------- файлы ----------
+
+function readUtf8(path) {
+    var s = new ActiveXObject("ADODB.Stream");
+    s.Type = 2; s.Charset = "utf-8"; s.Open();
+    s.LoadFromFile(path);
+    var t = s.ReadText(-1);
+    s.Close();
+    if (t.charCodeAt(0) == 0xFEFF) t = t.substr(1);
+    return t;
+}
+
+function writeUtf8Atomic(path, text) {
+    var tmp = path + ".tmp";
+    var s = new ActiveXObject("ADODB.Stream");
+    s.Type = 2; s.Charset = "utf-8"; s.Open();
+    s.WriteText(text);
+    s.SaveToFile(tmp, 2);
+    s.Close();
+    // Замена через удаление+переименование; файл мог быть открыт читателем (Python)
+    // в этот момент — тогда пара попыток, в конце — прямая перезапись
+    for (var i = 0; i < 3; i++) {
+        try {
+            if (fso.FileExists(path)) fso.DeleteFile(path, true);
+            fso.MoveFile(tmp, path);
+            return;
+        } catch (e) {
+            var t0 = new Date().getTime();
+            while (new Date().getTime() - t0 < 20) {}
+        }
+    }
+    try { if (fso.FileExists(tmp)) fso.DeleteFile(tmp, true); } catch (e2) {}
+    var s2 = new ActiveXObject("ADODB.Stream");
+    s2.Type = 2; s2.Charset = "utf-8"; s2.Open();
+    s2.WriteText(text);
+    s2.SaveToFile(path, 2);
+    s2.Close();
+}
+
+// ---------- текст (JScript 5 = ES3) ----------
+
+function inArray(arr, v) { for (var i = 0; i < arr.length; i++) if (arr[i] === v) return true; return false; }
+
+// Приведение переводов строк к \n (инвариант 4: хеш после нормализации).
+function normEol(t) { return String(t).replace(/\r\n/g, "\n").replace(/\r/g, "\n"); }
+
+// FNV-1a 32 по кодовым единицам UTF-16 нормализованного текста; та же функция в сервере Python.
+function fnv1a(t) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < t.length; i++) {
+        h ^= t.charCodeAt(i);
+        h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    return ("0000000" + h.toString(16)).slice(-8);
+}
+
+function eolInfo(t) {
+    t = String(t);
+    var crlf = (t.match(/\r\n/g) || []).length;
+    var cr = (t.match(/\r/g) || []).length - crlf;
+    var lf = (t.match(/\n/g) || []).length - crlf;
+    return { length: t.length, crlf: crlf, lf: lf, cr: cr, endsWithEol: /[\r\n]$/.test(t), bom: t.charCodeAt(0) == 0xFEFF };
+}
+
+// ---------- строка соединения и own_bases (инвариант 5) ----------
+
+// Нормализация пути: \ вместо /, нижний регистр, сетевой диск -> UNC, без хвостового \.
+function normFilePath(p) {
+    var s = String(p).replace(/\//g, "\\").toLowerCase();
+    var m = /^([a-z]:)(\\.*)$/.exec(s);
+    if (m) {
+        try {
+            var share = String(fso.GetDrive(m[1]).ShareName);
+            if (share && share.length) s = share.toLowerCase() + m[2];
+        } catch (e) {}
+    }
+    while (s.length > 3 && /\\$/.test(s)) s = s.substr(0, s.length - 1);
+    return s;
+}
+
+// Нормализованный ключ строки соединения: file:<путь> | srv:<сервер>/<база>
+function normConn(conn) {
+    var s = String(conn), parts = {}, re = /([A-Za-z]+)\s*=\s*([^;]*)(;|$)/g, m;
+    while ((m = re.exec(s)) != null) {
+        var v = m[2].replace(/^\s*"(.*)"\s*$/, "$1").replace(/^\s*'(.*)'\s*$/, "$1").replace(/\s+$/, "");
+        parts[m[1].toLowerCase()] = v;
+    }
+    if (parts.file !== undefined) return "file:" + normFilePath(parts.file);
+    if (parts.srvr !== undefined) return "srv:" + parts.srvr.toLowerCase() + "/" + String(parts.ref || "").toLowerCase();
+    return "raw:" + s.toLowerCase();
+}
+
+// ---------- метаданные ----------
+
+var CLASS_PLURAL = {
+    "справочник": "Справочники", "документ": "Документы", "общиймодуль": "ОбщиеМодули",
+    "обработка": "Обработки", "отчет": "Отчеты", "перечисление": "Перечисления",
+    "регистрсведений": "РегистрыСведений", "регистрнакопления": "РегистрыНакопления",
+    "планвидовхарактеристик": "ПланыВидовХарактеристик", "константа": "Константы",
+    "общаяформа": "ОбщиеФормы", "подсистема": "Подсистемы", "роль": "Роли",
+    "форма": "Формы", "реквизит": "Реквизиты", "табличнаячасть": "ТабличныеЧасти",
+    "макет": "Макеты", "команда": "Команды", "журналдокументов": "ЖурналыДокументов",
+    "бизнеспроцесс": "БизнесПроцессы", "задача": "Задачи", "планобмена": "ПланыОбмена",
+    "плансчетов": "ПланыСчетов", "планвидоврасчета": "ПланыВидовРасчета",
+    "регистрбухгалтерии": "РегистрыБухгалтерии", "регистррасчета": "РегистрыРасчета",
+    "измерение": "Измерения", "ресурс": "Ресурсы", "реквизитстандартный": "СтандартныеРеквизиты",
+    "значениеперечисления": "ЗначенияПеречисления", "последовательность": "Последовательности",
+    "параметрсеанса": "ПараметрыСеанса", "общийреквизит": "ОбщиеРеквизиты",
+    "критерийотбора": "КритерииОтбора", "подписканасобытие": "ПодпискиНаСобытия",
+    "регламентноезадание": "РегламентныеЗадания", "бот": "Боты",
+    "функциональнаяопция": "ФункциональныеОпции",
+    "параметрфункциональныхопций": "ПараметрыФункциональныхОпций",
+    "определяемыйтип": "ОпределяемыеТипы", "хранилищенастроек": "ХранилищаНастроек",
+    "общаякоманда": "ОбщиеКоманды", "группакоманд": "ГруппыКоманд",
+    "общиймакет": "ОбщиеМакеты"
+};
+
+// контейнер с открытой конфигурацией — для операций, читающих дерево напрямую
+function containerOrThrow(idx) {
+    var c = container(idx);
+    if (!c.rootObject) throw new Error("контейнер без открытой конфигурации");
+    return c;
+}
+function container(idx) {
+    if (idx === undefined || idx === null) return metadata.current;
+    var c = metadata.getContainer(idx);
+    if (!c) throw new Error("нет контейнера " + idx);
+    return c;
+}
+
+// Текст исключения с фоллбеком: на 3.0.66 у COM-ошибок description/message
+// бывают пустыми — без фоллбека наружу уходит голое "Error" (пробел 1 отчёта 08.11).
+function errStr(e) {
+    try { return String(e.description || e.message || e); } catch (e2) { return "Error"; }
+}
+
+// Поиск подчинённого без учёта регистра перебором индексов
+// (childObject(вид, имя) сравнивает с учётом регистра — находка ревью ред. 1).
+// childObjectsCount(строка) на 3.0.66 бросает у не-корневых объектов (пробелы 1/4
+// отчёта 08.11: resolve по пути ломался на КАЖДОМ составном пути) — счётчик
+// берём числовым индексом через childKindIndex; отсутствие вида = "не найден".
+function childByName(obj, kind, name) {
+    var idx = childKindIndex(obj, kind);
+    if (idx === null) return null;
+    var n = obj.childObjectsCount(idx);
+    var lname = String(name).toLowerCase();
+    for (var i = 0; i < n; i++) {
+        var ch = null;
+        try { ch = obj.childObject(kind, i); } catch (e) { continue; }
+        if (ch && String(ch.name).toLowerCase() == lname) return ch;
+    }
+    return null;
+}
+
+// Индекс дочернего вида по рус. имени («Реквизиты») — как в md_tree, только числовые
+// вызовы childObjectsCount/childObject. null, если вида нет (не ошибка!).
+function childKindIndex(obj, kind) {
+    var mdc = obj.mdclass, want = String(kind).toLowerCase();
+    for (var i = 0; i < mdc.childsClassesCount; i++) {
+        try { if (String(mdc.childClassAt(i).name(1, true)).toLowerCase() == want) return i; }
+        catch (e) {}
+    }
+    return null;
+}
+
+// "Справочник.Имя.Форма.ФормаЭлемента" -> IV8MDObject. Каждый вызов разрешает заново (инвариант 4а).
+function resolve(args) {
+    var root = container(args.container).rootObject;
+    if (!root) throw new Error("контейнер без открытой конфигурации");
+    if (!args.path) return root;
+    var parts = String(args.path).split(".");
+    if (parts.length % 2 != 0) throw new Error("путь из пар Класс.Имя: " + args.path);
+    var obj = root;
+    for (var i = 0; i < parts.length; i += 2) {
+        var kind = CLASS_PLURAL[parts[i].toLowerCase()];
+        if (!kind) throw new Error("неизвестный класс " + parts[i]);
+        var ch = childByName(obj, kind, parts[i + 1]);
+        if (!ch) throw new Error("не найден " + parts.slice(0, i + 2).join("."));
+        obj = ch;
+    }
+    if (args.uuid && String(obj.id).toLowerCase() != String(args.uuid).toLowerCase())
+        throw new Error("uuid не совпал: " + obj.id + " против " + args.uuid);
+    return obj;
+}
+
+function objInfo(obj) {
+    return { name: safeStr(obj.name), id: safeStr(obj.id), cls: safeStr(obj.mdclass.name(1)) };
+}
+
+function safeStr(v) {
+    try {
+        if (v === null || v === undefined) return null;
+        var t = typeof v;
+        if (t == "string" || t == "number" || t == "boolean") return v;
+        return String(v);
+    } catch (e) { return "?" + e.description; }
+}
+
+function cmdState(num) {
+    var s = getCmdState(CFG_GROUP, num);
+    return s ? { enabled: s.enabled, checked: s.checked } : null;
+}
+
+// Тип свойства "Тип": ОписаниеТипов -> читаемое представление, при сбое — внутренняя строка
+function typeToStr(v) {
+    try {
+        var arr = v.Типы(), names = [];
+        for (var i = 0; i < arr.Количество(); i++) names.push(String(arr.Получить(i)));
+        var r = { types: names };
+        try { r.length = v.КвалификаторыСтроки.Длина; } catch (e) {}
+        try { r.digits = v.КвалификаторыЧисла.Разрядность; r.fraction = v.КвалификаторыЧисла.РазрядностьДробнойЧасти; } catch (e) {}
+        return r;
+    } catch (e) {
+        try { return { internal: String(ЗначениеВСтрокуВнутр(v)) }; } catch (e2) { return "?" + e.description; }
+    }
+}
+
+// ---------- операции ----------
+
+var OPS = {};
+
+// Разведка команд: перебор номеров группы ГЛОБАЛЬНЫМ getCmdState (не IV8View —
+// у дерева он слеп, этап 7). text отдаётся не для всех команд — пустые не включаем.
+OPS.cmd_scan_global = function (a) {
+    var grp = String(a.group || CFG_GROUP);
+    var from = (a.from === undefined) ? 0 : a.from, to = (a.to === undefined) ? 200 : a.to;
+    var out = [], errors = 0;
+    for (var n = from; n <= to; n++) {
+        var st = null, tx = null;
+        try { st = getCmdState(grp, n); } catch (e) { errors++; continue; }
+        if (!st) continue;
+        try { tx = safeStr(st.text); } catch (e2) {}
+        if ((st.enabled || st.checked || tx)) out.push({ num: n, enabled: st.enabled,
+            checked: st.checked, text: tx });
+    }
+    return { group: grp, from: from, to: to, errors: errors, found: out };
+};
+
+OPS.ping = function (a) { return { pong: true, bridge: BRIDGE_VERSION, pid: myPid }; };
+
+// Послать команду из БЕЛОГО СПИСКА разведки/этапа 13 (поиск окон расширений,
+// заимствование Frntend,271 «Добавить в расширение»). Произвольные номера —
+// отказ (инвариант «нет code execution»); вызывающий сам проверяет окна/модалки.
+// №10: список переопределяется файлом mcp_bridge.cfg.json (ключ cfg_cmd_whitelist,
+// верхний уровень; читает readBridgeCfg в cfgCmdWhitelist) — без перезапуска.
+// Пусто/нет ключа/пустой массив = встроенный список ниже.
+var CFG_CMD_WHITELIST = [35, 38, 41, 43, 45, 46];
+var cfgCmdWhitelist = null; // null = встроенный CFG_CMD_WHITELIST
+var FRNT_GROUP = "{6B7291BF-BCD2-41AF-BAC7-414D47CC6E6A}";
+OPS.send_cfg_cmd = function (a) {
+    var num = a.num, grp = CFG_GROUP;
+    if (a.group === "frnt") {
+        grp = FRNT_GROUP;
+        if (num !== 271) throw new Error("Frntend: в белом списке только 271 (Добавить в расширение)");
+    } else {
+        var wl = cfgCmdWhitelist || CFG_CMD_WHITELIST;
+        var allowed = false;
+        for (var i = 0; i < wl.length; i++) if (wl[i] === num) allowed = true;
+        if (!allowed) throw new Error("номер " + num + " вне белого списка разведки " + wl.join(","));
+    }
+    var st = getCmdState(grp, num);
+    if (!st || !st.enabled) throw new Error("команда недоступна: " + grp.slice(1, 9) + "/" + num);
+    var sent = sendCommand(grp, num);
+    return { sent: sent, num: num, group: grp };
+};
+
+// ---------- отладчик (группа CDebug, проба «точки остановки через snegopat», 09.11) ----------
+// Полный набор команд отладчика живёт в stdcommands.CDebug (см. debugHelpers.js —
+// стоковый аддин так и шлёт Brkpt/BrkptDel/BreakOnError). Точка останова ставится
+// в позиции курсора АКТИВНОГО редактора модуля. Инвариант «нет code execution»:
+// явный белый список номеров, до/после — состояние команды (checked у Brkpt
+// отражает точку на текущей строке).
+var DEBUG_GROUP = "{DE680E96-5826-4E22-834D-692E307A1D9C}";
+var DEBUG_CMDS = {
+    OpenModule: { group: FRNT_GROUP, num: 11 },        // модуль объекта из дерева
+    Brkpt: { group: DEBUG_GROUP, num: 11 },            // точка останова (курсор)
+    BrkptCond: { group: DEBUG_GROUP, num: 12 },        // точка с условием (диалог)
+    BrkptOff: { group: DEBUG_GROUP, num: 13 },         // отключить точку
+    BrkptDel: { group: DEBUG_GROUP, num: 14 },         // убрать все точки
+    BrkptOffAll: { group: DEBUG_GROUP, num: 15 },      // отключить все точки
+    BrkptList: { group: DEBUG_GROUP, num: 16 },        // список точек (диалог, только проба)
+    BreakOnError: { group: DEBUG_GROUP, num: 21 },     // остановка при ошибке (диалог)
+    GoToSource: { group: DEBUG_GROUP, num: 22 }        // переход к строке с точкой
+};
+OPS.send_debug_cmd = function (a) {
+    var pc = DEBUG_CMDS[String(a.cmd || "")];
+    if (!pc) {
+        var names = [];
+        for (var n in DEBUG_CMDS) names.push(n);
+        throw new Error("cmd вне белого списка (" + names.join(", ") + "): " + a.cmd);
+    }
+    // ГАРД КОНТЕКСТА (первый прогон 09.11: Brkpt при фокусе на дереве заблокировал
+    // тик моста нативным ожиданием — состояние было только taskkill'ом): команды,
+    // зависящие от позиции курсора, исполняются ТОЛЬКО при активном редакторе модуля.
+    var cursorDependent = { Brkpt: 1, BrkptCond: 1, BrkptOff: 1, GoToSource: 1 };
+    var av = null;
+    try { av = windows.getActiveView(); } catch (eA) {}
+    var avTitle = av ? safeStr(av.title) : "";
+    if (cursorDependent[String(a.cmd)] && (!av || avTitle.indexOf("Модуль") < 0))
+        throw new Error("активный вид не редактор модуля (title=" + avTitle
+            + "); откройте модуль (send_debug_cmd cmd=OpenModule) и повторите");
+    var st = getCmdState(pc.group, pc.num);
+    if (!st || !st.enabled)
+        throw new Error("команда недоступна: " + a.cmd + (st ? ""
+            + " (состояние disabled)" : " (нет состояния — контекст: дерево/редактор/отладка)"));
+    var before = { enabled: st.enabled, checked: st.checked };
+    var sent = sendCommand(pc.group, pc.num);
+    var st2 = getCmdState(pc.group, pc.num);
+    var after = st2 ? { enabled: st2.enabled, checked: st2.checked } : null;
+    return { sent: sent, cmd: a.cmd, num: pc.num, group: pc.group, view: avTitle,
+        before: before, after: after };
+};
+
+// Активное текстовое окно (редактор модуля/текста) — snegopat.activeTextWindow();
+// методы ITextWindow getCaretPos/setCaretPos/setSelection обкатаны в стоковых
+// аддинах (BookMarkers.js, textEditorExt.js, git_blame.js).
+function activeTextWindowOrThrow() {
+    var tw = null;
+    try { tw = snegopat.activeTextWindow(); } catch (e) { tw = null; }
+    if (!tw) throw new Error("активное окно не текстовый редактор (откройте модуль: send_debug_cmd cmd=OpenModule)");
+    return tw;
+}
+
+// Курсор редактора: чтение/установка (строка, колонка с 1).
+OPS.editor_caret = function (a) {
+    var tw = activeTextWindowOrThrow();
+    if (a.line !== undefined || a.col !== undefined) {
+        tw.setCaretPos(Number(a.line || 1), Number(a.col || 1));
+    }
+    var pos = tw.getCaretPos();
+    return { caret: { row: pos.beginRow, col: pos.beginCol } };
+};
+
+// Переключить точку останова НАДЁЖНЫМ путём: F9 через PostMessage (ОЧЕРЕДЬ
+// сообщений — акселератор редактора отработает в главном цикле, тик моста не
+// блокируется). Уроки 09.11: (1) sendCommand(CDebug.Brkpt) из тика БЛОКИРУЕТ
+// тик нативным ожиданием без pump (cpu 0, модалки нет, только taskkill);
+// (2) SendMessage WM_KEYDOWN идёт мимо таблицы акселераторов — F9 не
+// срабатывает; (3) стрелки SendMessage каретку редактора не ведут (маркер
+// встал на пустую строку EOF) — позиционирование только setCaretPos.
+// PostMessageW берём из DynamicWrapperX (в snegopat winapi.js не зарегистрирован).
+var _dwxPost = null;
+function postMessageW(hwnd, msg, wp, lp) {
+    if (!_dwxPost) {
+        var dwx = new ActiveXObject("DynamicWrapperX");
+        dwx.Register("USER32.DLL", "PostMessageW", "i=hlll", "r=l");
+        _dwxPost = dwx;
+    }
+    return _dwxPost.PostMessageW(hwnd, msg, wp, lp);
+}
+OPS.editor_brkpt_toggle = function (a) {
+    var tw = activeTextWindowOrThrow();
+    if (a.line !== undefined) tw.setCaretPos(Number(a.line), 1);
+    var pos = tw.getCaretPos();
+    var hwnd = null;
+    try { hwnd = tw.GetHwnd ? tw.GetHwnd() : null; } catch (eH) {}
+    if (!hwnd) { hwnd = winApi.getFocus(); }
+    if (!hwnd) throw new Error("нет hwnd текстового окна");
+    var VK_F9 = 0x78;
+    postMessageW(hwnd, 0x100, VK_F9, 0x00430001); // WM_KEYDOWN, scancode F9=0x43
+    postMessageW(hwnd, 0x101, VK_F9, 0xC0430001); // WM_KEYUP
+    // состояние ТОЛЬКО как до-состояние: F9 обработается следующим тиком
+    var st = null;
+    try { st = getCmdState(DEBUG_GROUP, 11); } catch (e) {}
+    return { posted: true, caret: { row: pos.beginRow, col: pos.beginCol },
+        brkptStateBefore: st ? { enabled: st.enabled, checked: st.checked } : null };
+};
+
+// Состояние точки останова на текущей строке без переключения.
+OPS.editor_brkpt_state = function (a) {
+    var st = null;
+    try { st = getCmdState(DEBUG_GROUP, 11); } catch (e) {}
+    var av = null;
+    try { av = windows.getActiveView(); } catch (eA) {}
+    return { view: av ? safeStr(av.title) : null,
+        brkptState: st ? { enabled: st.enabled, checked: st.checked } : null };
+};
+
+// ---------- условная точка останова (Shift+F9 + модалка условия) ----------
+// Модификаторы через PostMessage не работают (приложение читает GetKeyState) —
+// keybd_event через DWX идёт в реальный поток ввода. Модалка условия
+// перехватывается onDoModal: probe-фаза (condition не задан) перечисляет
+// контролы и закрывает Отменой; fill-фаза заполняет строковый контрол значением
+// condition и жмёт ОК. Handler подключается ДО поста — модалка откроется на
+// следующем тике, необработанной она бы заблокировала сессию.
+var brkptCond = null;
+
+function onBrkptCondModal(d) {
+    try {
+        if (!brkptCond || brkptCond.done) return;
+        var ev = { stage: d.stage, caption: safeStr(d.caption) };
+        if (d.stage == 1) {
+            try { ev.controls = listControls(d.form); } catch (e) { ev.controlsErr = errStr(e); }
+            if (brkptCond.condition !== null && brkptCond.condition !== undefined) {
+                var setLog = [];
+                for (var i = 0; i < d.form.controlsCount; i++) {
+                    var c = d.form.getControl(i), nm = null, v = null;
+                    try { nm = String(c.name); } catch (eN) { continue; }
+                    if (!nm) continue;
+                    var low = nm.toLowerCase();
+                    if (low.indexOf("button") >= 0 || low.indexOf("btn") >= 0 || low == "ok" || low == "ок") continue;
+                    try { v = c.value; } catch (eV) { continue; }
+                    if (typeof v == "string") {
+                        try { d.form.getControl(nm).value = String(brkptCond.condition); setLog.push(nm); } catch (eS) {}
+                    }
+                }
+                ev.filled = setLog;
+                var okBtn = null;
+                for (var j = 0; j < d.form.controlsCount; j++) {
+                    var b = d.form.getControl(j), bn = null;
+                    try { bn = String(b.name); } catch (eB) { continue; }
+                    var bl = bn.toLowerCase();
+                    if (bl == "ok" || bl == "ок" || bl.indexOf("okbutton") >= 0 || bl == "buttonok") { okBtn = bn; break; }
+                }
+                if (okBtn) {
+                    try { d.form.sendEvent(d.form.getControl(okBtn).id, 0); ev.action = "нажата " + okBtn; }
+                    catch (eC) { ev.actionErr = errStr(eC); }
+                } else {
+                    ev.action = "кнопка ОК не найдена — Отмена";
+                    d.cancel = true; d.result = 2;
+                }
+            } else {
+                d.cancel = true; d.result = 2; ev.action = "Отмена (probe)";
+            }
+        }
+        brkptCond.modals.push(ev);
+        if (d.stage == 2 || d.stage == 3) brkptCond.done = true;
+    } catch (e) {}
+}
+
+var __dwxKbd = null;
+function _dwxKbd() {
+    if (!__dwxKbd) {
+        var dwx = new ActiveXObject("DynamicWrapperX");
+        dwx.Register("USER32.DLL", "keybd_event", "i=hhll");
+        __dwxKbd = dwx;
+    }
+    return __dwxKbd;
+}
+
+// Условная точка: НЕ РЕАЛИЗУЕМО из моста. Два зависания 10.11: Shift+F9 через
+// keybd_event модалку не открыл (модификаторы потерялись), sendCommand(CDebug,12)
+// с диалогом условия БЛОКИРУЕТ тик (как Brkpt — 60+ с, только taskkill). Вся
+// группа CDebug из тика небезопасна, кроме BrkptList (16, немодальная панель).
+// Условные точки — только вручную в конфигураторе.
+OPS.editor_brkpt_cond = function (a) {
+    throw new Error("условная точка останова из моста нереализуема: команды CDebug,12 "
+        + "блокируют тик (два зависания 10.11); поставьте вручную (Shift+F9 в конфигураторе)");
+};
+
+OPS.editor_brkpt_cond_state = function (a) {
+    if (!brkptCond) return { modals: [], done: false, note: "не запускалась" };
+    var r = { modals: brkptCond.modals, done: brkptCond.done };
+    return r;
+};
+
+OPS.session_info = function (a) {
+    return { pid: myPid, conn: sessionBase.conn, platform: sessionBase.platform,
+        bridge: BRIDGE_VERSION, modalMode: windows.modalMode, running: running,
+        containers: containersInfo(), stat: stat, home: HOME,
+        journal: { file: journalFile, count: journalCount, cfg: journalCfg } };
+};
+
+// Счёт объектов верхнего уровня по всем видам корня.
+OPS.md_counts = function (a) {
+    var root = containerOrThrow(a.container).rootObject;
+    var mdc = root.mdclass;
+    var res = {};
+    for (var i = 0; i < mdc.childsClassesCount; i++) {
+        var cls = mdc.childClassAt(i);
+        res[String(cls.name(1, true))] = root.childObjectsCount(i);
+    }
+    return res;
+};
+
+// Полный обход дерева (диагностика слотов childObjectsCount/childObject).
+OPS.md_walk = function (a) {
+    var t0 = new Date().getTime();
+    var total = 0, maxDepth = 0, bad = 0;
+    (function walk(obj, depth) {
+        total++;
+        if (depth > maxDepth) maxDepth = depth;
+        var mdc = obj.mdclass;
+        for (var i = 0; i < mdc.childsClassesCount; i++) {
+            var n = obj.childObjectsCount(i);
+            for (var j = 0; j < n; j++) {
+                var ch = obj.childObject(i, j);
+                if (!ch || !ch.id) { bad++; continue; }
+                walk(ch, depth + 1);
+            }
+        }
+    })(containerOrThrow(a.container).rootObject, 0);
+    return { total: total, maxDepth: maxDepth, bad: bad, ms: new Date().getTime() - t0 };
+};
+
+// Дети узла по видам, с пагинацией (ERP: десятки тысяч объектов верхнего уровня).
+// kinds — фильтр видов (рус. множественное: "Справочники", "Реквизиты", ...);
+// limit 0 — только счётчики. Пагинация общая по порядку видов.
+OPS.md_tree = function (a) {
+    var obj = resolve(a);
+    var mdc = obj.mdclass;
+    var kindsFilter = a.kinds || null;
+    if (kindsFilter) for (var kf = 0; kf < kindsFilter.length; kf++) kindsFilter[kf] = String(kindsFilter[kf]).toLowerCase();
+    var kinds = [], flat = [];
+    for (var i = 0; i < mdc.childsClassesCount; i++) {
+        var kindName = String(mdc.childClassAt(i).name(1, true));
+        if (kindsFilter && !inArray(kindsFilter, kindName.toLowerCase())) continue;
+        var n = obj.childObjectsCount(i);
+        kinds.push({ kind: kindName, count: n });
+        for (var j = 0; j < n; j++) flat.push({ kind: kindName, j: j });
+    }
+    var total = flat.length;
+    var offset = a.offset || 0;
+    var limit = a.limit === undefined ? 100 : a.limit;
+    if (limit > 1000) limit = 1000;
+    var items = [];
+    for (var q = offset; q < total && items.length < limit; q++) {
+        var ch = obj.childObject(flat[q].kind, flat[q].j);
+        if (!ch) { items.push({ kind: flat[q].kind, error: "null" }); continue; }
+        items.push({ kind: flat[q].kind, name: safeStr(ch.name), id: safeStr(ch.id), cls: safeStr(ch.mdclass.name(1)) });
+    }
+    return { obj: objInfo(obj), kinds: kinds, total: total, offset: offset, limit: limit,
+        items: items, hasMore: limit > 0 && offset + items.length < total };
+};
+
+// Список подчинённых заданного вида (имена и uuid) — сверки до/после.
+// Вид по имени -> числовой индекс (как в md_tree): строковый childObjectsCount
+// на 3.0.66 у не-корневых объектов бросал (пробел 4 отчёта 08.11).
+OPS.md_children = function (a) {
+    if (!a.kind) throw new Error("kind обязателен (например «Реквизиты»)");
+    var obj = resolve(a);
+    var idx = childKindIndex(obj, a.kind);
+    if (idx === null)
+        throw new Error("вид «" + a.kind + "» отсутствует у " + safeStr(obj.mdclass.name(1)) + " " + safeStr(obj.name));
+    var n = obj.childObjectsCount(idx), res = [];
+    for (var i = 0; i < n; i++) {
+        var ch = obj.childObject(a.kind, i);
+        if (!ch) continue;
+        res.push({ name: safeStr(ch.name), id: safeStr(ch.id) });
+    }
+    return { obj: objInfo(obj), kind: a.kind, count: n, items: res };
+};
+
+// Поиск по подстроке имени (без учёта регистра) по всему дереву, с пределом.
+// Путь в ответе — относительно корня, в формате resolve() ("Справочник.Имя.Реквизит.Х").
+OPS.md_find = function (a) {
+    var mask = String(a.mask || "").toLowerCase();
+    if (!mask) throw new Error("пустая маска поиска");
+    var wantKind = a.kind ? String(a.kind).toLowerCase() : null;
+    var limit = a.limit || 50;
+    if (limit > 500) limit = 500;
+    var t0 = new Date().getTime();
+    var matches = [], truncated = false;
+    // стек: {obj, path} — path сам объект относительно корня (у корня — "")
+    var stack = [{ obj: containerOrThrow(a.container).rootObject, path: "" }];
+    while (stack.length) {
+        var cur = stack.pop();
+        var obj = cur.obj;
+        var kindHere = String(obj.mdclass.name(1, true)).toLowerCase();
+        if (cur.path && String(obj.name).toLowerCase().indexOf(mask) >= 0 && (!wantKind || kindHere == wantKind)) {
+            matches.push({ path: cur.path, name: String(obj.name), id: String(obj.id), cls: String(obj.mdclass.name(1)) });
+            if (matches.length >= limit) { truncated = true; break; }
+        }
+        var mdc = obj.mdclass;
+        for (var i = 0; i < mdc.childsClassesCount; i++) {
+            var n = obj.childObjectsCount(i);
+            for (var j = n - 1; j >= 0; j--) {
+                var ch = obj.childObject(i, j);
+                if (ch && ch.id)
+                    stack.push({ obj: ch,
+                        path: cur.path
+                            ? cur.path + "." + String(ch.mdclass.name(1)) + "." + String(ch.name)
+                            : String(ch.mdclass.name(1)) + "." + String(ch.name) });
+            }
+        }
+    }
+    return { mask: a.mask, kind: a.kind || null, matches: matches, truncated: truncated, ms: new Date().getTime() - t0 };
+};
+
+// Объект: класс, uuid, имя, синоним, комментарий, свойства со значениями, модули с хешами.
+OPS.md_object = function (a) {
+    var obj = resolve(a);
+    var info = objInfo(obj);
+    info.comment = safeStr(obj.comment);
+    info.synonymRu = safeStr(obj.synonym("ru"));
+    var mdc = obj.mdclass, props = [], modules = [], pcount = 0;
+    try { pcount = mdc.propertiesCount; }
+    catch (ePC) { info.propsError = errStr(ePC); }
+    for (var i = 0; i < pcount; i++) {
+        // propertyAt/p.name не ограждены платформой: на реальных конфигурациях
+        // дескриптор бывает мёртвым и ронял весь md_object голым "Error" (пробел 1).
+        var pname = null, isMod = false;
+        try { pname = String(mdc.propertyAt(i).name(1)); }
+        catch (ePD) { props.push({ index: i, error: "propertyAt(" + i + "): " + errStr(ePD) }); continue; }
+        try { isMod = obj.isPropModule(pname); } catch (e) {}
+        if (isMod) {
+            props.push({ name: pname, isModule: true });
+            try {
+                var mt = String(obj.getModuleText(pname));
+                modules.push({ prop: pname, hash: fnv1a(normEol(mt)),
+                    lines: mt.length ? normEol(mt).split("\n").length : 0 });
+            } catch (e) { modules.push({ prop: pname, error: errStr(e) }); }
+        } else {
+            var rec = { name: pname };
+            try {
+                if (pname == "Тип") rec.value = typeToStr(obj.property(pname));
+                else rec.value = safeStr(obj.property(pname));
+            } catch (e) { rec.value = "?" + errStr(e); }
+            props.push(rec);
+        }
+    }
+    info.props = props;
+    info.modules = modules;
+    return info;
+};
+
+OPS.prop_get = function (a) {
+    var obj = resolve(a);
+    var v = obj.property(a.prop);
+    var res = { obj: objInfo(obj), type: typeof v, value: safeStr(v) };
+    if (String(a.prop) == "Тип") res.value = typeToStr(v);
+    return res;
+};
+
+// Чтение свойства-объекта (Состав подсистемы, Владельцы, ...) внутренней строкой.
+OPS.prop_get_internal = function (a) {
+    var obj = resolve(a);
+    return { obj: objInfo(obj), internal: String(ЗначениеВСтрокуВнутр(obj.property(a.prop))) };
+};
+
+// Запись простого свойства с ожидаемым значением и постусловием (инварианты 3, 4).
+OPS.prop_set = function (a) {
+    var obj = resolve(a);
+    var before = safeStr(obj.property(a.prop));
+    if (a.expected !== undefined && before !== a.expected)
+        throw new Error("текущее значение не совпало с ожидаемым: " + before);
+    var okSet = obj.setProperty(a.prop, a.value);
+    // После переименования старый путь недействителен — постусловие ищет по uuid
+    var obj2 = obj;
+    if (String(a.prop).toLowerCase() == "имя") {
+        var pp = String(a.path).split("."); pp[pp.length - 1] = a.value;
+        obj2 = resolve({ container: a.container, path: pp.join("."), uuid: String(obj.id) });
+    } else obj2 = resolve(a);
+    var after = safeStr(obj2.property(a.prop));
+    if (after !== a.value) throw new Error("постусловие: значение после записи не совпало: " + after);
+    return { obj: objInfo(obj2), setResult: okSet, before: before, after: after,
+        isModified: container(a.container).isModified };
+};
+
+// Запись свойства-объекта внутренним представлением с ожидаемым значением.
+OPS.prop_set_internal = function (a) {
+    var obj = resolve(a);
+    if (a.expectId && String(obj.id) != a.expectId) throw new Error("uuid не совпал");
+    var before = String(ЗначениеВСтрокуВнутр(obj.property(a.prop)));
+    if (a.expectBefore !== undefined && before != a.expectBefore) throw new Error("текущее значение не совпало с ожидаемым");
+    var ok = obj.setProperty(a.prop, ЗначениеИзСтрокиВнутр(a.internal));
+    var after = String(ЗначениеВСтрокуВнутр(resolve(a).property(a.prop)));
+    if (after != String(a.internal)) throw new Error("постусловие: внутреннее значение после записи не совпало");
+    return { obj: objInfo(obj), set: ok, before: before, after: after };
+};
+
+// Тип реквизита: простые типы через v8New("ОписаниеТипов", ...).
+// Ссылочные типы так роняют процесс — только prop_set_type_internal (этап 7).
+// Квалификаторы — только при наличии: null/undefined в v8New("КвалификаторыЧисла")
+// вешал движок (24.10.2026).
+function typeDescr(t) {
+    var hasDigits = t.digits !== undefined && t.digits !== null;
+    var hasLen = t.length !== undefined && t.length !== null;
+    var nq = hasDigits ? v8New("КвалификаторыЧисла", t.digits, t.fraction || 0) : undefined;
+    var sq = hasLen ? v8New("КвалификаторыСтроки", t.length) : undefined;
+    return v8New("ОписаниеТипов", t.types.join(","), nq, sq);
+}
+OPS.prop_set_type = function (a) {
+    var obj = resolve(a);
+    if (a.expectId && String(obj.id) != a.expectId) throw new Error("uuid не совпал");
+    var before = typeToStr(obj.property("Тип"));
+    var ok = obj.setProperty("Тип", typeDescr(a.type));
+    var after = typeToStr(resolve(a).property("Тип"));
+    return { obj: objInfo(obj), before: before, set: ok, after: after };
+};
+
+// Ссылочные и составные типы — внутренней строкой вида {"#",f5c65050-…,{…}}.
+// GUID прикладного типа — из type_lookup (typeList контейнера).
+OPS.type_lookup = function (a) {
+    var lst = container(a.container).typeList("", 1), res = [], want = String(a.name || "").toLowerCase();
+    for (var i = 0; i < lst.length; i++) {
+        var t = lst.item(i);
+        if (!a.name || String(t.name).toLowerCase() == want) res.push({ name: String(t.name), clsid: String(t.clsid) });
+        if (res.length >= (a.limit || 20)) break;
+    }
+    return { total: lst.length, found: res };
+};
+OPS.prop_set_type_internal = function (a) {
+    var obj = resolve(a);
+    if (a.expectId && String(obj.id) != a.expectId) throw new Error("uuid не совпал");
+    if (!/^\{"#",f5c65050-3bbb-11d5-b988-0050bae0a95d,/.test(String(a.internal))) throw new Error("не описание типов");
+    var before = typeToStr(obj.property("Тип"));
+    var td = ЗначениеИзСтрокиВнутр(a.internal);
+    var ok = obj.setProperty("Тип", td);
+    var after = typeToStr(resolve(a).property("Тип"));
+    return { obj: objInfo(obj), before: before, set: ok, after: after };
+};
+
+// ---------- модули ----------
+
+// Текст модуля: хеш, размер, перевод строк; withText — сам текст; openEditor — буфер и readOnly.
+OPS.module_get = function (a) {
+    var obj = resolve(a);
+    if (!obj.isPropModule(a.prop)) throw new Error("свойство не модуль: " + a.prop);
+    var text = String(obj.getModuleText(a.prop));
+    var norm = normEol(text);
+    var res = { obj: objInfo(obj), prop: a.prop, hash: fnv1a(norm),
+        lines: norm.length ? norm.split("\n").length : 0, length: text.length, eol: eolInfo(text) };
+    if (a.openEditor) {
+        var w = obj.openModule(a.prop);
+        if (!w) throw new Error("openModule вернул null");
+        res.readOnly = w.readOnly;
+        var buf = String(w.text);
+        res.bufferHash = fnv1a(normEol(buf));
+        res.bufferSame = res.bufferHash == res.hash;
+    }
+    if (a.withText) res.text = text;
+    return res;
+};
+
+// Замена всего текста модуля через редактор: выделение (1,1)-(n+1,1), selectedText=.
+// getModuleText — живой буфер вместе с несохранённой правкой человека (опыт 3а):
+// expected_hash защищает и от неё, и от параллельной правки.
+OPS.module_set = function (a) {
+    var obj = resolve(a);
+    if (!obj.isPropModule(a.prop)) throw new Error("свойство не модуль: " + a.prop);
+    var w = obj.openModule(a.prop);
+    if (!w) throw new Error("openModule вернул null");
+    if (w.readOnly) throw new Error("модуль только для чтения");
+    var bufText = String(w.text), propText = String(obj.getModuleText(a.prop));
+    if (normEol(bufText) != normEol(propText)) throw new Error("в редакторе несохранённая правка: буфер и свойство расходятся");
+    var curHash = fnv1a(normEol(bufText));
+    if (a.expected_hash !== curHash) throw new Error("expected_hash не совпал: текущий " + curHash);
+    var t0 = new Date().getTime();
+    var n = w.linesCount;
+    w.setSelection(1, 1, n + 1, 1);
+    w.selectedText = a.text;
+    var ms = new Date().getTime() - t0;
+    var obj2 = resolve(a);
+    var after = String(w.text), afterProp = String(obj2.getModuleText(a.prop));
+    var want = normEol(a.text);
+    if (normEol(after) != want || normEol(afterProp) != want)
+        throw new Error("постусловие: текст после записи не совпал с переданным");
+    return { obj: objInfo(obj2), ms: ms, linesBefore: n, linesAfter: w.linesCount,
+        hash: fnv1a(normEol(afterProp)), isModified: container(a.container).isModified };
+};
+
+// Точечные правки по номерам строк (1-based): edits = [{line, from, to}].
+// Строка сверяется точно; хеш модуля обязателен. Меньше трафика, меньше шанс затереть.
+OPS.module_patch = function (a) {
+    var obj = resolve(a);
+    if (!obj.isPropModule(a.prop)) throw new Error("свойство не модуль: " + a.prop);
+    var edits = a.edits || [];
+    if (!edits.length) throw new Error("пустой список правок");
+    var w = obj.openModule(a.prop);
+    if (!w) throw new Error("openModule вернул null");
+    if (w.readOnly) throw new Error("модуль только для чтения");
+    var bufText = String(w.text), propText = String(obj.getModuleText(a.prop));
+    if (normEol(bufText) != normEol(propText)) throw new Error("в редакторе несохранённая правка: буфер и свойство расходятся");
+    var curHash = fnv1a(normEol(bufText));
+    if (a.expected_hash !== curHash) throw new Error("expected_hash не совпал: текущий " + curHash);
+    var norm = normEol(bufText);
+    var trailingEol = /\n$/.test(norm);
+    var lines = norm.split("\n");
+    if (trailingEol) lines.pop(); // хвостовой пустой элемент от завершающего \n
+    for (var i = 0; i < edits.length; i++) {
+        var e = edits[i], li = e.line - 1;
+        if (!(li >= 0 && li < lines.length)) throw new Error("правка " + i + ": строка вне модуля: " + e.line);
+        if (String(lines[li]) != String(e.from)) throw new Error("правка " + i + ": строка " + e.line + " не совпала: «" + lines[li] + "»");
+        lines[li] = String(e.to);
+    }
+    var newText = lines.join("\n") + (trailingEol || lines.length == 0 ? "\n" : "");
+    var t0 = new Date().getTime();
+    var n = w.linesCount;
+    w.setSelection(1, 1, n + 1, 1);
+    w.selectedText = newText;
+    var ms = new Date().getTime() - t0;
+    var obj2 = resolve(a);
+    var after = String(w.text), afterProp = String(obj2.getModuleText(a.prop));
+    var want = normEol(newText);
+    if (normEol(after) != want || normEol(afterProp) != want)
+        throw new Error("постусловие: текст после правок не совпал с собранным");
+    return { obj: objInfo(obj2), ms: ms, applied: edits.length, linesAfter: w.linesCount,
+        hash: fnv1a(normEol(afterProp)), isModified: container(a.container).isModified };
+};
+
+// ---------- формы (внутренний текст, этап 8 плана: через открытый редактор) ----------
+
+// Frame-группа («Основные команды меню», commands.js): FileSave(4) «Сохранить
+// документ» / FileClose(3) «Закрыть документ» активному документу. П3 28.10.2026:
+// form_load меняет ТОЛЬКО буфер редактора (isModified контейнера не выставляется,
+// config_save правку не забирает); FileSave буфер не коммитит — пробуем close.
+var FRAME_GROUP = "{00000000-0000-0000-0000-000000000000}";
+OPS.editor_commit = function (a) {
+    var num = a.num === undefined ? 4 : a.num;
+    if (num !== 3 && num !== 4) throw new Error("разрешены FileClose(3)/FileSave(4)");
+    var v = findViewByTitle(String(a.title));
+    if (!v) throw new Error("представление не найдено: " + a.title);
+    try { v.activate(); } catch (e) { throw new Error("activate: " + e.description); }
+    var av = null;
+    try { av = windows.getActiveView(); } catch (eA) {}
+    var t = av ? safeStr(av.title) : null;
+    if (!t || String(t).indexOf(String(a.title)) < 0)
+        throw new Error("активация не удалась: активно «" + t + "»");
+    // FileSave/FileClose на дереве ОСНОВНОЙ конфигурации = сохранение МИНУС гейт
+    // config_save (архив cf-отката) — запрет (ревью v1.0.0 H)
+    if (String(t).indexOf("Конфигурация") === 0)
+        throw new Error("editor_commit запрещён на дереве основной конфигурации — "
+            + "используйте config_save (инвариант архивной точки отката)");
+    var st = null;
+    try { st = getCmdState(FRAME_GROUP, num); } catch (eS) { st = "?" + eS.description; }
+    var sent = sendCommand(FRAME_GROUP, num);
+    var si = null;
+    try { si = container(a.container); } catch (eI) {}
+    return { sent: sent, num: num, cmdState: st, activeTitle: t,
+        isModified: si ? si.isModified : null };
+};
+
+function formFile(name) {
+    if (!/^[A-Za-z0-9_.\-]+$/.test(String(name))) throw new Error("недопустимое имя файла " + name);
+    if (!fso.FolderExists(FORMS_DIR)) fso.CreateFolder(FORMS_DIR);
+    return FORMS_DIR + name;
+}
+function extPropWithEditor(a) {
+    var obj = resolve(a);
+    try { obj.editProperty(a.prop); } catch (e) {}
+    var ep = resolve(a).getExtProp(a.prop);
+    if (!ep) throw new Error("getExtProp вернул null");
+    return ep;
+}
+OPS.form_save = function (a) {
+    var path = formFile(a.file);
+    var ep = extPropWithEditor(a);
+    var f = v8files.open("file://" + path, 0x2 | 0x8 | 0x10);
+    if (!f) throw new Error("не открыт файл " + path);
+    var t0 = new Date().getTime();
+    try {
+        ep.saveToFile(f);
+    } finally {
+        f.close();
+    }
+    // постусловие (инвариант 3): перечитать и отдать хеш — form_load обязан
+    // сверить его с текущим состоянием формы перед загрузкой
+    var text = readUtf8(path);
+    return { file: path, size: fso.GetFile(path).Size, ms: new Date().getTime() - t0,
+        hash: fnv1a(normEol(text)), lines: normEol(text).split("\n").length };
+};
+OPS.form_load = function (a) {
+    var path = formFile(a.file);
+    if (!fso.FileExists(path)) throw new Error("нет файла " + path);
+    if (!a.expected_hash) throw new Error("expected_hash обязателен (снимите form_save)");
+    // инвариант 4: текущее состояние формы выгружается во временный файл и сверяется
+    // с expected_hash — иначе loadFromFile затрёт несохранённые правки человека
+    var cur = FORMS_DIR + "__current_" + myPid + ".bin";
+    var ep = extPropWithEditor(a);
+    var f = v8files.open("file://" + cur, 0x2 | 0x8 | 0x10);
+    if (!f) throw new Error("не открыт временный файл");
+    try { ep.saveToFile(f); } finally { f.close(); }
+    var curHash = fnv1a(normEol(readUtf8(cur)));
+    try { fso.DeleteFile(cur, true); } catch (eDel) {}
+    if (a.expected_hash !== curHash)
+        throw new Error("expected_hash не совпал: текущее состояние формы " + curHash +
+            " (форма изменена с момента form_save — отказ, правки не тронуты)");
+    f = v8files.open("file://" + path, 0x8);
+    if (!f) throw new Error("не открыт файл " + path);
+    var t0 = new Date().getTime();
+    var ok;
+    try { ok = ep.loadFromFile(f); } finally { f.close(); }
+    return { file: path, loaded: ok, ms: new Date().getTime() - t0,
+        isModified: container(a.container).isModified };
+};
+OPS.extprop_probe = function (a) {
+    var obj = resolve(a);
+    var ep = obj.getExtProp(a.prop);
+    if (!ep) return { obj: objInfo(obj), extProp: null };
+    var r = { obj: objInfo(obj), idData: safeStr(ep.idData), idEditor: safeStr(ep.idEditor) };
+    try { r.probe = safeStr(ep.probe()); } catch (e) { r.probe = "?" + e.description; }
+    return r;
+};
+
+// ---------- конфигурация: открыть, архив, сохранить ----------
+
+// Открыть основную конфигурацию (без этого metadata.current — конфигурация БД).
+OPS.config_open = function (a) {
+    var before = { open: cmdState(2), close: cmdState(4), save: cmdState(3) };
+    var sent = false;
+    if (before.open && before.open.enabled) sent = sendCommand(CFG_GROUP, 2);
+    return { before: before, sent: sent, after: { open: cmdState(2), close: cmdState(4), save: cmdState(3) },
+        currentIdentifier: safeStr(metadata.current.identifier), openedCount: metadata.openedCount };
+};
+
+// Архив cf штатной командой «Сохранить конфигурацию в файл» (Config, 7):
+// путь подставляется перехватом onSelectFile, вопрос о несохранённых правках — «Нет»
+// (в cf уходит последнее сохранённое состояние = точка отката; решение владельца 16.10.2026).
+var pendingArchive = null;
+function onSelectFileMcp(fd) {
+    try {
+        if (!pendingArchive) return;
+        var ev = { mode: fd.mode, defExt: safeStr(fd.defExt), title: safeStr(fd.title), initial: safeStr(fd.initialFileName) };
+        pendingArchive.selectEvents.push(ev);
+        if (fd.mode == 1 && !pendingArchive.used) {
+            fd.addSelectedFile(pendingArchive.path);
+            fd.result = 1;
+            pendingArchive.used = true;
+            ev.action = "подставлен путь";
+        } else {
+            fd.result = 2;
+            ev.action = "отмена (не наш диалог)";
+        }
+    } catch (e) { if (pendingArchive) pendingArchive.errors.push("onSelectFile: " + e.description); }
+}
+function onMsgBoxMcp(mb) {
+    try {
+        if (!pendingArchive) return;
+        var ev = { caption: safeStr(mb.caption), text: safeStr(mb.text), type: mb.type };
+        pendingArchive.msgBoxes.push(ev);
+        mb.cancel = true;
+        if ((mb.type & 0x0F) == 3 && /была изменена\. Сохранить изменения\?$/.test(String(mb.text))) { mb.result = 7; ev.action = "Нет"; }
+        else if ((mb.type & 0x0F) == 4 && /^Обнаружены возможные ошибки в конфигурации\. Продолжить\?$/.test(String(mb.text)))
+            { if (pendingArchive.acceptWarnings) { mb.result = 6; ev.action = "Да (acceptWarnings)"; } else { mb.result = 7; ev.action = "Нет"; } }
+        else if ((mb.type & 0x0F) == 0) { mb.result = 1; ev.action = "ОК"; }
+        else { mb.result = 2; ev.action = "Отмена"; }
+    } catch (e) { if (pendingArchive) pendingArchive.errors.push("onMessageBox: " + e.description); }
+}
+function onSaveMsg(p) { try { if (pendingArchive && pendingArchive.messages) pendingArchive.messages.push(String(p.text)); } catch (e) {} }
+function backupFile(name) {
+    if (!/^[A-Za-z0-9_.\-]+\.cf$/.test(String(name))) throw new Error("недопустимое имя cf " + name);
+    var path = BACKUPS_DIR + String(name);
+    if (fso.FileExists(path)) throw new Error("файл уже есть " + path);
+    return path;
+}
+OPS.cfg_archive_cf = function (a) {
+    var path = backupFile(a.file);
+    var st = cmdState(7);
+    if (!st || !st.enabled) throw new Error("команда «Сохранить конфигурацию в файл» недоступна");
+    pendingArchive = { path: path, used: false, selectEvents: [], msgBoxes: [], errors: [] };
+    var sent = false, t0 = new Date().getTime();
+    try {
+        events.connect(Designer, "onSelectFile", SelfScript.self, "onSelectFileMcp");
+        events.connect(windows, "onMessageBox", SelfScript.self, "onMsgBoxMcp");
+        sent = sendCommand(CFG_GROUP, 7);
+    } finally {
+        try { events.disconnect(Designer, "onSelectFile", SelfScript.self, "onSelectFileMcp"); } catch (e) {}
+        try { events.disconnect(windows, "onMessageBox", SelfScript.self, "onMsgBoxMcp"); } catch (e) {}
+    }
+    var pa = pendingArchive; pendingArchive = null;
+    var res = { file: path, sent: sent, ms: new Date().getTime() - t0, pathUsed: pa.used,
+        selectEvents: pa.selectEvents, msgBoxes: pa.msgBoxes, errors: pa.errors,
+        exists: fso.FileExists(path) };
+    if (res.exists) res.size = fso.GetFile(path).Size;
+    if (!res.exists || !res.size || !pa.used)
+        throw new Error("архив cf не создан (exists=" + res.exists + ", used=" + pa.used + ")");
+    return res;
+};
+
+// Загрузка cf штатной командой «Загрузить конфигурацию из файла» (Config, 6) —
+// этап 8 §3.2: запись cf2 в живую базу БЕЗ закрытия конфигуратора. Пакетный
+// /LoadCfg после kill упирался в «1Cv8.cdn. Схема не зарегистрирована» (окно
+// недоступности базы + зомби-конфигураторы, e2e 28.10.2026) — мостовая команда
+// снимает весь класс проблем: сессия не меняется, kill не нужен.
+var pendingLoad = null;
+function onSelectFileLoadMcp(fd) {
+    try {
+        if (!pendingLoad) return;
+        var ev = { mode: fd.mode, defExt: safeStr(fd.defExt), title: safeStr(fd.title), initial: safeStr(fd.initialFileName) };
+        pendingLoad.selectEvents.push(ev);
+        if (fd.mode == 0 && !pendingLoad.used) {   // диалог ОТКРЫТИЯ
+            fd.addSelectedFile(pendingLoad.path);
+            fd.result = 1;
+            pendingLoad.used = true;
+            ev.action = "подставлен путь";
+        } else {
+            fd.result = 2;
+            ev.action = "отмена (не наш диалог)";
+        }
+    } catch (e) { if (pendingLoad) pendingLoad.errors.push("onSelectFile: " + e.description); }
+}
+function onMsgBoxLoadMcp(mb) {
+    try {
+        if (!pendingLoad) return;
+        var ev = { caption: safeStr(mb.caption), text: safeStr(mb.text), type: mb.type };
+        pendingLoad.msgBoxes.push(ev);
+        mb.cancel = true;
+        var t = String(mb.text), k = mb.type & 0x0F;
+        if ((k == 3 || k == 4) && /загруз|потер/i.test(t)) { mb.result = 6; ev.action = "Да"; }
+        else if (k == 0) { mb.result = 1; ev.action = "ОК"; }
+        else { mb.result = 2; ev.action = "Отмена (незнакомый)"; pendingLoad.stranger = ev; }
+    } catch (e) { if (pendingLoad) pendingLoad.errors.push("onMessageBox: " + e.description); }
+}
+OPS.cfg_load_cf = function (a) {
+    var path = String(a.cf || "");
+    if (!CF_PATH_RE.test(path) || !fso.FileExists(path))
+        throw new Error("недопустимый или отсутствующий cf: " + path);
+    var c = container(a.container);
+    if (c.isModified) throw new Error("контейнер изменён (isModified=true) — загрузка отклонена (потеря правок)");
+    var st = cmdState(6);
+    if (!st || !st.enabled) throw new Error("команда «Загрузить конфигурацию из файла» недоступна");
+    pendingLoad = { path: path, used: false, selectEvents: [], msgBoxes: [], errors: [], stranger: null };
+    var sent = false, t0 = new Date().getTime();
+    try {
+        events.connect(Designer, "onSelectFile", SelfScript.self, "onSelectFileLoadMcp");
+        events.connect(windows, "onMessageBox", SelfScript.self, "onMsgBoxLoadMcp");
+        sent = sendCommand(CFG_GROUP, 6);
+    } finally {
+        try { events.disconnect(Designer, "onSelectFile", SelfScript.self, "onSelectFileLoadMcp"); } catch (e) {}
+        try { events.disconnect(windows, "onMessageBox", SelfScript.self, "onMsgBoxLoadMcp"); } catch (e) {}
+    }
+    var pl = pendingLoad; pendingLoad = null;
+    var res = { cf: path, sent: sent, ms: new Date().getTime() - t0, pathUsed: pl.used,
+        selectEvents: pl.selectEvents, msgBoxes: pl.msgBoxes, errors: pl.errors,
+        stranger: pl.stranger, isModified: container(a.container).isModified };
+    if (pl.stranger) throw new Error("незнакомый диалог при загрузке: " +
+        safeStr(pl.stranger.caption) + " / " + safeStr(pl.stranger.text) + " — проверьте модальный дампер");
+    if (!pl.used) throw new Error("диалог выбора файла не отработал (pathUsed=false)");
+    return res;
+};
+
+// Сохранение конфигурации (Config, 3). Только при архиве cf, снятом в этой сессии (инвариант 5).
+OPS.config_save = function (a) {    var arch = String(a.archive || "");
+    if (!CF_BACKUP_RE.test(arch) || !fso.FileExists(arch) || fso.GetFile(arch).Size == 0)
+        throw new Error("нет архива cf перед сохранением: " + arch);
+    var c = container(a.container);
+    var before = c.isModified;
+    var st = cmdState(3);
+    if (!st || !st.enabled) throw new Error("команда «Сохранить конфигурацию» недоступна (isModified=" + before + ")");
+    pendingArchive = { path: "", used: true, selectEvents: [], msgBoxes: [], errors: [], messages: [], acceptWarnings: !!a.acceptWarnings };
+    var sent = false, t0 = new Date().getTime();
+    try {
+        events.connect(windows, "onMessageBox", SelfScript.self, "onMsgBoxMcp");
+        events.connect(windows, "onMessage", SelfScript.self, "onSaveMsg");
+        sent = sendCommand(CFG_GROUP, 3);
+    } finally {
+        try { events.disconnect(windows, "onMessageBox", SelfScript.self, "onMsgBoxMcp"); } catch (e) {}
+        try { events.disconnect(windows, "onMessage", SelfScript.self, "onSaveMsg"); } catch (e) {}
+    }
+    var pa = pendingArchive; pendingArchive = null;
+    var res = { sent: sent, ms: new Date().getTime() - t0, isModifiedBefore: before, isModifiedAfter: c.isModified,
+        msgBoxes: pa.msgBoxes, messages: pa.messages, errors: pa.errors, archive: arch };
+    if (sent && c.isModified) throw new Error("постусловие: конфигурация всё ещё изменена после сохранения");
+    return res;
+};
+
+// ---------- этап 7: создание и удаление через дерево метаданных ----------
+
+// Выделить объект в дереве.
+OPS.tree_activate = function (a) {
+    var obj = resolve(a);
+    obj.activateInTree();
+    return objInfo(obj);
+};
+// Послать клавиши навигации дерева БЕЗ Insert — отдельным тиком: раскрытие узла
+// («+») завершается асинхронно, и нажатия из того же вызова уходят мимо.
+// Пара tree_nav (раскрытие) -> пауза -> md_add_child (ход + Insert) надёжнее
+// одного пакета клавиш (проверено на узле «Общие», 24.10.2026).
+OPS.tree_nav = function (a) {
+    var keys = a.keys || [];
+    var hwnd = winApi.getFocus();
+    if (!hwnd) hwnd = ensureInputFocus();
+    if (!hwnd) throw new Error("нет фокуса ввода: активируйте окно конфигуратора");
+    for (var k = 0; k < keys.length; k++) {
+        if (!inArray([0x25, 0x26, 0x27, 0x28, 0x24, 0x23, 0x6B, 0x6D], keys[k]))
+            throw new Error("не клавиша навигации: " + keys[k]);
+        winApi.sendMessage(hwnd, 0x100, keys[k], 0x01000001);
+        winApi.sendMessage(hwnd, 0x101, keys[k], 0xC1000001);
+    }
+    return { sent: keys.length };
+};
+// Выделить узел группы подчинённых вида kind (activateInTreeEx с GUID класса подчинённых).
+// Смоук v1.2.3 (чистая машина, отчёт 08.11): падала «Объект не поддерживает это
+// свойство или метод» — воспроизводится и на 1.6.43, и на 3.0.66. Диагностика
+// (md_class_probe): у дескриптора подчинённого класса нет .id, activateInTreeEx
+// может отсутствовать. Падение больше не роняет операцию: выделяем сам объект
+// и честно сообщаем, что именно не поддержал хост.
+OPS.tree_activate_group = function (a) {
+    var obj = resolve(a);
+    var mdc = obj.mdclass, guid = null, names = [], unsupported = null;
+    for (var i = 0; i < mdc.childsClassesCount; i++) {
+        var cc = mdc.childClassAt(i), nm = null;
+        try { nm = String(cc.name(1, true)); }
+        catch (eN) { unsupported = "childClassAt(" + i + ").name: " + errStr(eN); continue; }
+        names.push(nm);
+        if (nm.toLowerCase() == String(a.kind).toLowerCase()) {
+            try { guid = String(cc.id); }
+            catch (eG) { unsupported = "childClass.id: " + errStr(eG); }
+            break;
+        }
+    }
+    if (!guid) {
+        if (unsupported) throw new Error(unsupported + " (фоллбек невозможен)");
+        throw new Error("у класса нет подчинённых вида " + a.kind + "; есть: " + names.join(", "));
+    }
+    try {
+        var ok = obj.activateInTreeEx(guid);
+        return { obj: objInfo(obj), kind: a.kind, classGuid: guid, ok: ok };
+    } catch (eA) {
+        // фоллбек: выделить сам объект — навигация к группе не удалась
+        try { obj.activateInTree(); } catch (eF) {}
+        return { obj: objInfo(obj), kind: a.kind, classGuid: guid, ok: false,
+            groupActivated: false, reason: "activateInTreeEx: " + errStr(eA) };
+    }
+};
+
+// Диагностика возможностей mdclass/mdobject хоста: что поддерживают
+// дескрипторы подчинённых классов и методы активации (этап 21, смоук v1.2.3).
+OPS.md_class_probe = function (a) {
+    var obj = resolve(a);
+    var mdc = obj.mdclass, out = [];
+    for (var i = 0; i < mdc.childsClassesCount; i++) {
+        var cc = mdc.childClassAt(i), rec = { i: i };
+        try { rec.name = String(cc.name(1, true)); } catch (e) { rec.nameErr = errStr(e); }
+        try { rec.id = String(cc.id); } catch (e) { rec.idErr = errStr(e); }
+        out.push(rec);
+    }
+    var act = null, ext = null;
+    try { act = typeof obj.activateInTree; } catch (e) { act = "err: " + errStr(e); }
+    try { ext = typeof obj.activateInTreeEx; } catch (e) { ext = "err: " + errStr(e); }
+    return { obj: objInfo(obj), childs: out, activateInTree: act, activateInTreeEx: ext };
+};
+
+var addCapture = null;
+function onMdAdd(e) {
+    try {
+        if (!addCapture || e.kind != 0) return;
+        var rec = { request: e.request };
+        try { rec.id = String(e.obj.id); rec.name = String(e.obj.name); rec.cls = String(e.obj.mdclass.name(1)); } catch (x) {}
+        try { rec.parentId = String(e.parentObj.id); } catch (x) {}
+        addCapture.events.push(rec);
+    } catch (x) {}
+}
+
+// Настройки из <mcp>\mcp_bridge.cfg.json: журнал (enabled, kinds[], maxFileMB,
+// keepFiles) и белый список команд (№10: cfg_cmd_whitelist — массив номеров для
+// send_cfg_cmd; нет ключа/пусто/плохие элементы = встроенный CFG_CMD_WHITELIST).
+// Перечитывается по mtime — применение без перезапуска конфигуратора.
+function readBridgeCfg() {
+    var p = ROOT + "mcp_bridge.cfg.json";
+    if (!fso.FileExists(p)) return;
+    var mt = String(fso.GetFile(p).DateLastModified);
+    if (mt === journalCfgStamp) return;
+    journalCfgStamp = mt;
+    try {
+        var c = JSON.parse(readUtf8(p));
+        if (c.journal) {
+            journalCfg.enabled = c.journal.enabled !== false;
+            journalCfg.kinds = c.journal.kinds || [];
+            if (c.journal.maxFileMB) journalCfg.maxFileMB = c.journal.maxFileMB;
+            if (c.journal.keepFiles) journalCfg.keepFiles = c.journal.keepFiles;
+        }
+        if (c.cfg_cmd_whitelist !== undefined) {
+            cfgCmdWhitelist = null;
+            var wl = c.cfg_cmd_whitelist;
+            if (wl && typeof wl.length === "number" && wl.length > 0) {
+                var ok = [];
+                for (var w = 0; w < wl.length; w++) {
+                    var n = Number(wl[w]);
+                    if (isFinite(n) && n > 0 && n === Math.floor(n)) ok.push(n);
+                }
+                if (ok.length) cfgCmdWhitelist = ok;
+            }
+        }
+    } catch (e) {}
+}
+
+// Ротация: journal/<pid>.jsonl -> .1 -> .2 ... (хранить keepFiles штук)
+function rotateJournal() {
+    try {
+        if (!fso.FileExists(journalFile)) return;
+        if (fso.GetFile(journalFile).Size <= journalCfg.maxFileMB * 1048576) return;
+        var keep = journalCfg.keepFiles;
+        if (keep < 1) keep = 1;
+        for (var i = keep - 1; i >= 1; i--) {
+            var a = journalFile + "." + i;
+            if (fso.FileExists(a)) {
+                if (i + 1 >= keep) fso.DeleteFile(a, true);
+                else fso.MoveFile(a, journalFile + "." + (i + 1));
+            }
+        }
+        if (keep > 1) {
+            if (fso.FileExists(journalFile + ".1")) fso.DeleteFile(journalFile + ".1", true);
+            fso.MoveFile(journalFile, journalFile + ".1");
+        } else {
+            fso.DeleteFile(journalFile, true);
+        }
+    } catch (e) {}
+}
+
+// Журнал MetaDataEvent (этап 18): ВСЕ изменения метаданных — человек и мост.
+// src=agent, пока busy (инвариант 2: идёт обработка запроса моста), иначе human.
+// Файл journal/<pid>.jsonl в UTF-16 (FSO append), постусловие не требуется —
+// журнал диагностический, ошибки записи молча глотаются.
+function onMdJournal(e) {
+    try {
+        readBridgeCfg();
+        if (!journalCfg.enabled) return;
+        if (journalCfg.kinds.length && !inArray(journalCfg.kinds, e.kind)) return;
+        var rec = { ts: new Date().getTime(), pid: myPid, src: busy ? "agent" : "human",
+            kind: e.kind, kindName: MD_KINDS[e.kind] || String(e.kind), request: !!e.request };
+        try { rec.obj = { id: String(e.obj.id), name: String(e.obj.name),
+            cls: String(e.obj.mdclass.name(1)) }; } catch (x) {}
+        try { rec.parentId = String(e.parentObj.id); } catch (x) {}
+        try { rec.container = String(e.obj.container.get_identifier()); } catch (x) {
+            try { rec.container = String(e.parentObj.container.get_identifier()); } catch (x2) {}
+        }
+        if (!fso.FolderExists(JOURNAL_DIR)) fso.CreateFolder(JOURNAL_DIR);
+        rotateJournal();
+        var f = fso.OpenTextFile(journalFile, 8, true, -1);
+        f.WriteLine(JSON.stringify(rec));
+        f.Close();
+        journalCount++;
+    } catch (x) {}
+}
+function listControls(form) {
+    var res = [];
+    try {
+        for (var i = 0; i < form.controlsCount; i++) {
+            var c = form.getControl(i), r = { i: i };
+            try { r.name = safeStr(c.name); } catch (e) {}
+            try { r.value = safeStr(c.value); } catch (e) { r.value = "?"; }
+            res.push(r);
+        }
+    } catch (e) { res.push({ error: String(e.description) }); }
+    return res;
+}
+// Модальные окна при создании (конструктор формы и т.п.): политика wizard — нажать кнопки
+// конструктора; любой незнакомый диалог — Отмена (инвариант 6).
+function onAddModal(d) {
+    try {
+        if (!addCapture) return;
+        var ev = { stage: d.stage, caption: safeStr(d.caption) };
+        if (d.stage == 1) {
+            var wz = addCapture.wizard;
+            if (addCapture.modalPolicy == "leave") {
+                // не трогаем диалог: его закроет стоящий мастер-раннер (флаг-файл)
+                // — клик из тика внутри конструктора вешал поток (24.10.2026)
+                ev.action = "оставлен мастер-раннеру";
+            } else if (addCapture.modalPolicy == "wizard" && wz && wz.caption == String(d.caption)) {
+                ev.set = [];
+                var steps = wz.steps || [];
+                for (var si = 0; si < steps.length; si++) {
+                    var st = steps[si];
+                    try {
+                        if (st.click) { d.form.sendEvent(d.form.getControl(st.click).id, 0); ev.set.push("click " + st.click); }
+                        if (st.set) for (var sn in st.set) if (st.set.hasOwnProperty(sn)) {
+                            d.form.getControl(sn).value = st.set[sn]; ev.set.push(sn + "=" + safeStr(d.form.getControl(sn).value));
+                        }
+                    } catch (e) { ev.set.push("шаг " + si + ": " + e.description); }
+                }
+                for (var ai = 0; ai < (wz.report || []).length; ai++) {
+                    try { ev.after = ev.after || []; ev.after.push(wz.report[ai] + "=" + safeStr(d.form.getControl(wz.report[ai]).value)); } catch (e) {}
+                }
+                if (steps.length) { ev.action = "шаги выполнены"; addCapture.modals.push(ev); return; }
+                for (var nm in wz.values) if (wz.values.hasOwnProperty(nm)) {
+                    try { d.form.getControl(nm).value = wz.values[nm]; ev.set.push(nm + "=" + safeStr(d.form.getControl(nm).value)); }
+                    catch (e) { ev.set.push(nm + ": " + e.description); }
+                }
+                if (wz.click) {
+                    try { d.form.sendEvent(d.form.getControl(wz.click).id, 0); ev.action = "нажата " + wz.click; }
+                    catch (e) { d.cancel = true; d.result = 2; ev.action = "Отмена (кнопка не нажалась: " + e.description + ")"; }
+                } else { d.cancel = true; d.result = 1; ev.action = "ОК"; }
+            } else { d.cancel = true; d.result = 2; ev.action = "Отмена"; }
+        }
+        if (d.stage == 2) { try { ev.result = safeStr(d.result); } catch (e) {} }
+        addCapture.modals.push(ev);
+    } catch (e) {}
+}
+
+// Подъём окна конфигуратора изнутри процесса (когда фокуса нет): SendKeys("%") даёт
+// процессу право на foreground, AppActivate поднимает окно. AttachThreadInput/SetFocus
+// снаружи не применяются — после них создание окон 1cv8 зависало (23.10.2026).
+function ensureInputFocus() {
+    var hwnd = winApi.getFocus();
+    if (hwnd) return hwnd;
+    try {
+        var sh = new ActiveXObject("WScript.Shell");
+        sh.SendKeys("%");
+        if (sh.AppActivate(myPid)) {
+            // AppActivate синхронен; фокус обновляется сразу
+            hwnd = winApi.getFocus();
+        }
+    } catch (e) { stat.lastError = "AppActivate: " + e.description; }
+    return hwnd || 0;
+}
+
+// Создать подчинённый объект. Два способа навигации (этап 7):
+//  sibling — выделить соседний объект того же вида и Insert;
+//  firstChild — выделить владельца, navKeys (клавиши дерева) до узла группы и Insert.
+// Созданный объект принимается только при совпадении класса и владельца в mdeAdd; прочее — stray.
+OPS.md_add_child = function (a) {
+    var owner = resolve({ container: a.container, path: a.ownerPath });
+    var ownerId = String(owner.id);
+    var kind = a.kind;
+    var before = owner.childObjectsCount(kind);
+    var sib = a.firstChild ? null : childByName(owner, kind, a.sibling);
+    if (!sib && !a.firstChild) throw new Error("не найден соседний объект " + a.sibling);
+    if (!a.noActivate) (sib || owner).activateInTree();
+    if (a.requireTree) {
+        var av = null; try { av = windows.getActiveView(); } catch (e) {}
+        var avTitle = av ? safeStr(av.title) : null;
+        var isMainTree = avTitle && String(avTitle).indexOf("Конфигурация") == 0;
+        // дерево расширения имеет заголовок = отображаемое имя расширения; для
+        // операций в расширении (container задан) разрешаем любой заголовок, КРОМЕ
+        // дерева основной конфигурации — уход Insert/Delete в основное дерево =
+        // порча (этап 13, ревью М-6); неверное расширение отсекает uuid-инвариант
+        var extMode = (a.container !== undefined && a.container !== null);
+        if (a.requireTree && !extMode && (!avTitle || !isMainTree))
+            throw new Error("фокус не в дереве метаданных: активно «" + avTitle + "»");
+        if (extMode && isMainTree)
+            throw new Error("фокус в дереве ОСНОВНОЙ конфигурации при операции в расширении — отказ (М-6)");
+    }
+    addCapture = { events: [], modals: [], modalPolicy: a.modalPolicy || "cancel", wizard: a.wizard || null };
+    var sent = false, hwnd = 0;
+    try {
+        events.connect(windows, "onDoModal", SelfScript.self, "onAddModal");
+        events.connect(metadata, "MetaDataEvent", SelfScript.self, "onMdAdd");
+        hwnd = ensureInputFocus();
+        // hwnd у представлений в SnegAPI на 8.3.12+ всегда 0: нажатия идут в окно
+        // фокуса ввода; без него (окно конфигуратора в фоне и AppActivate не помог) — отказ
+        if (!hwnd) throw new Error("нет фокуса ввода: активируйте окно конфигуратора (сервер делает это перед операциями дерева)");
+        var nav = a.navKeys || [];
+        for (var k = 0; k < nav.length; k++) {
+            // только клавиши навигации: стрелки, Home/End, серые «+»/«−»
+            if (!inArray([0x25, 0x26, 0x27, 0x28, 0x24, 0x23, 0x6B, 0x6D], nav[k])) throw new Error("не клавиша навигации: " + nav[k]);
+            winApi.sendMessage(hwnd, 0x100, nav[k], 0x01000001);
+            winApi.sendMessage(hwnd, 0x101, nav[k], 0xC1000001);
+        }
+        winApi.sendMessage(hwnd, 0x100, 0x2D, 0x01520001);
+        winApi.sendMessage(hwnd, 0x101, 0x2D, 0xC1520001);
+        sent = true;
+    } finally {
+        try { events.disconnect(metadata, "MetaDataEvent", SelfScript.self, "onMdAdd"); } catch (e) {}
+        try { events.disconnect(windows, "onDoModal", SelfScript.self, "onAddModal"); } catch (e) {}
+    }
+    var cap = addCapture; addCapture = null;
+    var owner2 = resolve({ container: a.container, path: a.ownerPath });
+    var after = owner2.childObjectsCount(kind);
+    var created = null;
+    for (var i = 0; i < cap.events.length; i++) {
+        var ev = cap.events[i];
+        if (!ev.request && ev.parentId == ownerId) created = ev;
+    }
+    var res = { sent: sent, method: "key", hwnd: hwnd, before: before, after: after,
+        events: cap.events, created: created, modals: cap.modals };
+    res.stray = [];
+    for (var s2 = 0; s2 < cap.events.length; s2++) { var e2 = cap.events[s2]; if (!e2.request && e2.parentId != ownerId) res.stray.push(e2); }
+    if (created && a.expectClass && created.cls != a.expectClass) { res.classMismatch = created.cls; res.wrong = created; created = null; res.created = null; }
+    if (!created) return res;
+    // Новый объект — заново по uuid среди подчинённых владельца (инвариант 4а)
+    var obj = null;
+    for (var j = 0; j < after; j++) { var ch = owner2.childObject(kind, j); if (String(ch.id) == created.id) { obj = ch; break; } }
+    res.foundById = !!obj;
+    if (obj && a.newName) {
+        res.renameResult = obj.setProperty("Имя", a.newName);
+        var obj2 = childByName(resolve({ container: a.container, path: a.ownerPath }), kind, a.newName);
+        res.renamed = !!obj2 && String(obj2.id) == created.id;
+        if (!res.renamed) throw new Error("переименование не подтверждено: объект " + created.id + " не найден под именем " + a.newName);
+        if (obj2 && a.comment) { obj2.setProperty("Комментарий", a.comment); res.comment = safeStr(obj2.property("Комментарий")); }
+    }
+    return res;
+};
+
+// Удаление клавишей Delete в дереве. Только с явным uuid (инвариант 5).
+var delCapture = null;
+var a_delModalAllowed = [];
+function onDelBox(m) {
+    try {
+        if (!delCapture) return;
+        var ev = { caption: safeStr(m.caption), text: safeStr(m.text), type: m.type };
+        delCapture.boxes.push(ev);
+        m.cancel = true;
+        var t = m.type & 0x0F;
+        // только известный вопрос удаления; прочее — Отмена + refused (инвариант 6, ревью LOW 8)
+        if (t == 4 && /удалить объект конфигурации/i.test(String(m.text))) { m.result = 6; ev.action = "Да"; }
+        else { m.result = 2; ev.action = "Отмена (незнакомый вопрос)";
+            delCapture.refused.push(safeStr(m.text) || safeStr(m.caption)); }
+    } catch (e) {}
+}
+function onDelModal(d) {
+    try {
+        if (!delCapture) return;
+        var ev = { stage: d.stage, caption: safeStr(d.caption) };
+        delCapture.modals.push(ev);
+        if (d.stage == 1 && !inArray(a_delModalAllowed, String(d.caption))) { d.cancel = true; d.result = 2; ev.action = "Отмена (неизвестный диалог)"; }
+    } catch (e) {}
+}
+function onDelMd(e) { try { if (delCapture && e.kind == 2) delCapture.md.push({ request: e.request, id: e.obj ? String(e.obj.id) : null }); } catch (x) {} }
+OPS.md_delete = function (a) {
+    var obj = resolve(a);
+    if (!a.uuid) throw new Error("удаление только с явным uuid");
+    var id = String(obj.id), parentPath = String(a.path).split(".").slice(0, -2).join("."), kind = CLASS_PLURAL[String(a.path).split(".").slice(-2)[0].toLowerCase()];
+    var owner = resolve({ container: a.container, path: parentPath });
+    var before = owner.childObjectsCount(kind);
+    if (!a.noActivate) obj.activateInTree();
+    if (a.requireTree) {
+        var av = null; try { av = windows.getActiveView(); } catch (e) {}
+        var avTitle = av ? safeStr(av.title) : null;
+        var isMainTree = avTitle && String(avTitle).indexOf("Конфигурация") == 0;
+        var extMode = (a.container !== undefined && a.container !== null);
+        if (!extMode && (!avTitle || !isMainTree))
+            throw new Error("фокус не в дереве метаданных: активно «" + avTitle + "»");
+        if (extMode && isMainTree)
+            throw new Error("фокус в дереве ОСНОВНОЙ конфигурации при операции в расширении — отказ (М-6)");
+    }
+    delCapture = { boxes: [], modals: [], md: [], refused: [] };
+    a_delModalAllowed = a.allowModals || [];
+    try {
+        events.connect(windows, "onMessageBox", SelfScript.self, "onDelBox");
+        events.connect(windows, "onDoModal", SelfScript.self, "onDelModal");
+        events.connect(metadata, "MetaDataEvent", SelfScript.self, "onDelMd");
+        var hwnd = ensureInputFocus();
+        if (!hwnd) throw new Error("нет фокуса ввода: активируйте окно конфигуратора (сервер делает это перед операциями дерева)");
+        winApi.sendMessage(hwnd, 0x100, 0x2E, 0x01530001);
+        winApi.sendMessage(hwnd, 0x101, 0x2E, 0xC1530001);
+    } finally {
+        try { events.disconnect(windows, "onMessageBox", SelfScript.self, "onDelBox"); } catch (e) {}
+        try { events.disconnect(windows, "onDoModal", SelfScript.self, "onDelModal"); } catch (e) {}
+        try { events.disconnect(metadata, "MetaDataEvent", SelfScript.self, "onDelMd"); } catch (e) {}
+    }
+    var cap = delCapture; delCapture = null;
+    if (cap.refused.length)
+        throw new Error("удаление прервано незнакомым вопросом: " + cap.refused.join(" | "));
+    var owner2 = resolve({ container: a.container, path: parentPath });
+    var after = owner2.childObjectsCount(kind), still = false;
+    for (var i = 0; i < after; i++) if (String(owner2.childObject(kind, i).id) == id) still = true;
+    if (still) throw new Error("постусловие: объект всё ещё присутствует после удаления");
+    return { id: id, before: before, after: after, boxes: cap.boxes, modals: cap.modals, md: cap.md };
+};
+
+// ---------- этап 5: проверка, хранилище, обновление БД ----------
+
+// Синтаксическая проверка (Config, 9): результат — из окна сообщений (onMessage).
+var synCapture = null;
+function onSynMsg(p) { try { if (synCapture) synCapture.messages.push(String(p.text)); } catch (e) {} }
+function onSynBox(m) {
+    try {
+        if (!synCapture) return;
+        var ev = { caption: safeStr(m.caption), text: safeStr(m.text), type: m.type };
+        synCapture.boxes.push(ev);
+        m.cancel = true;
+        var t = m.type & 0x0F;
+        if (t == 0) { m.result = 1; ev.action = "ОК"; }
+        else { m.result = 2; ev.action = "Отмена"; synCapture.refused.push(safeStr(m.caption) + ": " + safeStr(m.text)); }
+    } catch (e) {}
+}
+OPS.syntax_check = function (a) {
+    var st = cmdState(9);
+    if (!st || !st.enabled) throw new Error("команда «Синтаксическая проверка» недоступна");
+    synCapture = { messages: [], boxes: [], refused: [] };
+    var sent = false, t0 = new Date().getTime();
+    try {
+        events.connect(windows, "onMessage", SelfScript.self, "onSynMsg");
+        events.connect(windows, "onMessageBox", SelfScript.self, "onSynBox");
+        sent = sendCommand(CFG_GROUP, 9);
+    } finally {
+        try { events.disconnect(windows, "onMessage", SelfScript.self, "onSynMsg"); } catch (e) {}
+        try { events.disconnect(windows, "onMessageBox", SelfScript.self, "onSynBox"); } catch (e) {}
+    }
+    var cap = synCapture; synCapture = null;
+    var errs = [];
+    for (var i = 0; i < cap.messages.length; i++) if (/ошибка|\{ошибка\}/i.test(cap.messages[i])) errs.push(cap.messages[i]);
+    var res = { sent: sent, ms: new Date().getTime() - t0, messages: cap.messages,
+        boxes: cap.boxes, errorLines: errs, hasErrors: errs.length > 0 };
+    if (cap.refused.length) { res.refused = cap.refused; throw new Error("проверка прервана незнакомым окном: " + cap.refused.join(" | ")); }
+    return res;
+};
+
+// Диагностика диалога команды: открыть модальное окно команды из белого списка,
+// перечислить контролы, закрыть Отменой. Ничего не выполняет.
+var PROBE_CMDS = {
+    cfgstore: { group: STG_GROUP, nums: [150, 151, 152, 153] },
+    config: { group: CFG_GROUP, nums: [9, 29] },
+    debug: { group: DEBUG_GROUP, nums: [16, 21] }   // список точек останова, остановка при ошибке
+};
+var probeCapture = null;
+function onProbeModal(d) {
+    try {
+        if (!probeCapture) return;
+        var ev = { stage: d.stage, caption: safeStr(d.caption) };
+        if (d.stage == 1) {
+            try { ev.controls = listControls(d.form); } catch (e) { ev.controlsErr = String(e.description); }
+            d.cancel = true; d.result = 2; ev.action = "Отмена (проба)";
+        }
+        probeCapture.modals.push(ev);
+    } catch (e) {}
+}
+function onProbeBox(m) {
+    try { if (probeCapture) { probeCapture.boxes.push({ caption: safeStr(m.caption), text: safeStr(m.text), type: m.type }); m.cancel = true; m.result = 2; } } catch (e) {}
+}
+OPS.dialog_probe = function (a) {
+    var pc = PROBE_CMDS[String(a.cmdGroup || "").toLowerCase()];
+    if (!pc) throw new Error("неизвестная группа команды пробы: " + a.cmdGroup);
+    if (!inArray(pc.nums, a.num)) throw new Error("номер команды не разрешён для пробы: " + a.num);
+    var st = getCmdState(pc.group, a.num);
+    probeCapture = { modals: [], boxes: [], state: st ? { enabled: st.enabled, checked: st.checked } : null };
+    try {
+        events.connect(windows, "onDoModal", SelfScript.self, "onProbeModal");
+        events.connect(windows, "onMessageBox", SelfScript.self, "onProbeBox");
+        if (st && st.enabled) probeCapture.sent = sendCommand(pc.group, a.num);
+    } finally {
+        try { events.disconnect(windows, "onDoModal", SelfScript.self, "onProbeModal"); } catch (e) {}
+        try { events.disconnect(windows, "onMessageBox", SelfScript.self, "onProbeBox"); } catch (e) {}
+    }
+    var cap = probeCapture; probeCapture = null;
+    return cap;
+};
+
+// Хранилище: состояние команд захвата/помещения у объекта (косвенный статус, план §4.3).
+function stgState(num) {
+    var s = getCmdState(STG_GROUP, num);
+    return s ? { enabled: s.enabled, checked: s.checked, text: safeStr(s.text) } : null;
+}
+function stgAutoconnectLoaded() {
+    try { return !!addins.byUniqueName("stg_autoconnect"); } catch (e) { return false; }
+}
+var stgCapture = null;
+function onStgModal(d) {
+    try {
+        if (!stgCapture) return;
+        var ev = { stage: d.stage, caption: safeStr(d.caption) };
+        stgCapture.modals.push(ev);
+        if (d.stage != 1) return;
+        var cap = String(d.caption);
+        if (stgCapture.mode == "capture" && /захват.*хранилище/i.test(cap)) {
+            try { d.form.getControl("GetRecursive").value = !!stgCapture.recursive; ev.setRecursive = true; }
+            catch (e) { ev.setRecursiveErr = String(e.description); }
+            d.cancel = true; d.result = 1; ev.action = "ОК";
+        } else if (stgCapture.mode == "commit" && /помещени.*хранилище/i.test(cap)) {
+            // Поле комментария помещения — EnrollComment (снято dialog_probe-эквивалентом,
+            // 24.10.2026); без комментария отказ (инвариант 5)
+            var cands = ["EnrollComment", "Comment", "Комментарий", "Description"], set = false, names = [];
+            for (var ci = 0; ci < d.form.controlsCount; ci++) {
+                var c = null; try { c = d.form.getControl(ci); } catch (x) { continue; }
+                var cn = safeStr(c && c.name); names.push(cn);
+                if (!set && cn && inArray(cands, String(cn))) {
+                    try { c.value = stgCapture.comment; set = safeStr(c.value) == String(stgCapture.comment); ev.commentSet = String(cn); } catch (x) { ev.commentErr = String(x.description); }
+                }
+            }
+            ev.controls = names;
+            if (!set) { d.cancel = true; d.result = 2; ev.action = "Отмена (поле комментария не найдено/не записано)"; stgCapture.refused.push("комментарий"); }
+            else { d.cancel = true; d.result = 1; ev.action = "ОК"; }
+        } else {
+            d.cancel = true; d.result = 2; ev.action = "Отмена (незнакомый диалог)";
+            stgCapture.refused.push(cap);
+        }
+    } catch (e) {}
+}
+function onStgBox(m) {
+    try {
+        if (!stgCapture) return;
+        stgCapture.boxes.push({ caption: safeStr(m.caption), text: safeStr(m.text), type: m.type });
+        m.cancel = true;
+        m.result = ((m.type & 0x0F) == 0) ? 1 : 2;
+    } catch (e) {}
+}
+function stgCommonChecks() {
+    if (stgAutoconnectLoaded()) throw new Error("загружен stg_autoconnect.js — порядок обработчиков диалогов не гарантирован (инвариант 5)");
+}
+
+// Захват: активировать объект в дереве -> команда 151 -> диалог с проверкой заголовка
+// (не «OK в любом окне», как в образце CfgStore.js:105-123 — план §4.3).
+OPS.cfgstore_capture = function (a) {
+    stgCommonChecks();
+    var obj = resolve(a);
+    if (String(obj.id) == String(container(a.container).rootObject.id)) throw new Error("захват корня конфигурации не поддерживается");
+    obj.activateInTree();
+    var before = { capture: stgState(151), store: stgState(152) };
+    if (!before.capture || !before.capture.enabled) throw new Error("команда «Захватить в хранилище» недоступна (объект уже захвачен или нет хранилища)");
+    stgCapture = { mode: "capture", recursive: !!a.recursive, modals: [], boxes: [], refused: [] };
+    var sent = false, t0 = new Date().getTime();
+    try {
+        events.connect(windows, "onDoModal", SelfScript.self, "onStgModal");
+        events.connect(windows, "onMessageBox", SelfScript.self, "onStgBox");
+        sent = sendCommand(STG_GROUP, 151);
+    } finally {
+        try { events.disconnect(windows, "onDoModal", SelfScript.self, "onStgModal"); } catch (e) {}
+        try { events.disconnect(windows, "onMessageBox", SelfScript.self, "onStgBox"); } catch (e) {}
+    }
+    var cap = stgCapture; stgCapture = null;
+    var after = { capture: stgState(151), store: stgState(152) };
+    var res = { sent: sent, ms: new Date().getTime() - t0, before: before, after: after,
+        modals: cap.modals, boxes: cap.boxes };
+    if (cap.refused.length) { res.refused = cap.refused; throw new Error("захват прерван незнакомым окном: " + cap.refused.join(" | ")); }
+    // ВНИМАНИЕ: getCmdState(151/152) на 8.3.27.2074 обе команды держит доступными всегда —
+    // косвенный постусловие по ним НЕ работает (проверено 24.10.2026). Факт захвата
+    // проверяется помещением: его диалог перечисляет захваченные объекты.
+    res.capturedIndirect = null;
+    return res;
+};
+
+// Помещение: один объект за вызов (активировать -> команда 152), комментарий обязателен.
+// Список объектов в диалоге (ReviseObjectList — грид) надёжно не записывается — поэтому
+// только по одному (решение по итогам первого опыта этапа 5, план §5).
+OPS.cfgstore_commit = function (a) {
+    stgCommonChecks();
+    var comment = String(a.comment || "");
+    if (!comment || !comment.length) throw new Error("комментарий обязателен (инвариант 5)");
+    var obj = resolve(a);
+    obj.activateInTree();
+    var before = { capture: stgState(151), store: stgState(152) };
+    if (!before.store || !before.store.enabled) throw new Error("команда «Поместить в хранилище» недоступна (нет захваченных объектов или нет хранилища)");
+    stgCapture = { mode: "commit", comment: comment, modals: [], boxes: [], refused: [] };
+    var sent = false, t0 = new Date().getTime();
+    try {
+        events.connect(windows, "onDoModal", SelfScript.self, "onStgModal");
+        events.connect(windows, "onMessageBox", SelfScript.self, "onStgBox");
+        sent = sendCommand(STG_GROUP, 152);
+    } finally {
+        try { events.disconnect(windows, "onDoModal", SelfScript.self, "onStgModal"); } catch (e) {}
+        try { events.disconnect(windows, "onMessageBox", SelfScript.self, "onStgBox"); } catch (e) {}
+    }
+    var cap = stgCapture; stgCapture = null;
+    var after = { capture: stgState(151), store: stgState(152) };
+    var res = { sent: sent, ms: new Date().getTime() - t0, before: before, after: after,
+        modals: cap.modals, boxes: cap.boxes };
+    if (cap.refused.length) { res.refused = cap.refused; throw new Error("помещение прервано: " + cap.refused.join(" | ")); }
+    return res;
+};
+
+// Обновление конфигурации БД (Config, 29) — только для own_bases (инвариант 5):
+// нормализованное сравнение строки соединения, разрешённые диалоги — по подстроке заголовка,
+// всё незнакомое закрывается Отменой и даёт отказ с заголовком (инвариант 6).
+var updCapture = null;
+function matchAllowed(caption, allowed) {
+    var c = String(caption).toLowerCase();
+    for (var i = 0; i < allowed.length; i++) if (c.indexOf(String(allowed[i]).toLowerCase()) >= 0) return true;
+    return false;
+}
+function onUpdModal(d) {
+    try {
+        if (!updCapture) return;
+        var ev = { stage: d.stage, caption: safeStr(d.caption) };
+        updCapture.modals.push(ev);
+        if (d.stage != 1) return;
+        if (matchAllowed(d.caption, updCapture.allowed)) { d.cancel = true; d.result = 1; ev.action = "ОК (разрешённый диалог)"; }
+        else { d.cancel = true; d.result = 2; ev.action = "Отмена (незнакомый диалог)"; updCapture.refused.push(safeStr(d.caption)); }
+    } catch (e) {}
+}
+function onUpdBox(m) {
+    try {
+        if (!updCapture) return;
+        var ev = { caption: safeStr(m.caption), text: safeStr(m.text), type: m.type };
+        updCapture.boxes.push(ev);
+        m.cancel = true;
+        var t = m.type & 0x0F;
+        if (t == 0) { m.result = 1; ev.action = "ОК"; }
+        else if (matchAllowed(m.caption, updCapture.allowed)) { m.result = 1; ev.action = "ОК (разрешённый)"; }
+        else { m.result = 2; ev.action = "Отмена"; updCapture.refused.push(safeStr(m.caption) + ": " + safeStr(m.text)); }
+    } catch (e) {}
+}
+OPS.update_db_cfg = function (a) {
+    var own = a.own_bases || [];
+    if (!own.length) throw new Error("список own_bases пуст — обновление конфигурации БД запрещено");
+    var mine = normConn(СтрокаСоединенияИнформационнойБазы());
+    var matched = false;
+    for (var i = 0; i < own.length; i++) if (normConn(String(own[i])) == mine) matched = true;
+    if (!matched) throw new Error("база не входит в own_bases (" + mine + ") — отказ");
+    var st = cmdState(29);
+    if (!st || !st.enabled) throw new Error("команда «Обновить конфигурацию БД» недоступна");
+    updCapture = { allowed: a.allowedDialogs || ["реорганизация информации", "принять"], modals: [], boxes: [], refused: [] };
+    var sent = false, t0 = new Date().getTime();
+    try {
+        events.connect(windows, "onDoModal", SelfScript.self, "onUpdModal");
+        events.connect(windows, "onMessageBox", SelfScript.self, "onUpdBox");
+        sent = sendCommand(CFG_GROUP, 29);
+    } finally {
+        try { events.disconnect(windows, "onDoModal", SelfScript.self, "onUpdModal"); } catch (e) {}
+        try { events.disconnect(windows, "onMessageBox", SelfScript.self, "onUpdBox"); } catch (e) {}
+    }
+    var cap = updCapture; updCapture = null;
+    var res = { sent: sent, ms: new Date().getTime() - t0, modals: cap.modals, boxes: cap.boxes };
+    if (cap.refused.length) { res.refused = cap.refused; throw new Error("обновление прервано незнакомым окном: " + cap.refused.join(" | ")); }
+    return res;
+};
+
+// ---------- представления (диагностика) ----------
+
+function viewInfo(v, path) {
+    var r = { path: path };
+    try { r.title = safeStr(v.title); } catch (e) {}
+    try { r.cls = safeStr(v.wndClass); } catch (e) {}
+    try { r.id = safeStr(v.id); } catch (e) {}
+    try { r.isContainer = v.isContainer; } catch (e) {}
+    return r;
+}
+function walkViews(v, path, out, depth) {
+    out.push(viewInfo(v, path));
+    if (depth > 6) return;
+    var lst = null;
+    try { lst = v.enumChilds(); } catch (e) { return; }
+    if (!lst) return;
+    for (var i = 0; i < lst.count; i++) walkViews(lst.item(i), path + "/" + i, out, depth + 1);
+}
+OPS.view_list = function (a) { var out = []; walkViews(windows.mainView, "0", out, 0); return out; };
+OPS.active_view = function (a) { var v = windows.getActiveView(); return v ? viewInfo(v, "?") : null; };
+
+// Контролы представления по индексам (диагностика редакторов объектов: панель
+// данных с кнопкой «добавить реквизит» — из спайка, перенесено 26.10.2026)
+// Поиск представления по подстроке заголовка свежим обходом (path из view_list
+// после смены окон не резолвится: mainView к следующему тику другой)
+function findViewByTitle(substr) {
+    var found = null;
+    (function walk(v) {
+        if (found || !v) return;
+        var t = null; try { t = safeStr(v.title); } catch (e) {}
+        if (t && String(t).indexOf(substr) >= 0) { found = v; return; }
+        var lst = null;
+        try { lst = v.enumChilds(); } catch (e) {}
+        if (lst) for (var i = 0; i < lst.count; i++) { walk(lst.item(i)); if (found) return; }
+    })(windows.mainView);
+    return found;
+}
+OPS.view_controls = function (a) {
+    var v = a.title !== undefined ? findViewByTitle(String(a.title)) : viewByPath(a.view);
+    if (!v) throw new Error("представление не найдено: " + (a.title || a.view));
+    var res = [];
+    var src = v;   // контролы ищем и на представлении, и на его внутренней форме
+    try { var f = v.getInternalForm(); if (f) src = f; } catch (eI) {}
+    try {
+        for (var i = 0; i < src.controlsCount; i++) {
+            var c = src.getControl(i), r = { i: i };
+            try { r.name = safeStr(c.name); } catch (e) {}
+            try { r.value = safeStr(c.value); } catch (e) { r.value = "?"; }
+            try { r.id = safeStr(c.id); } catch (e) {}
+            res.push(r);
+        }
+    } catch (e) { res.push({ error: String(e.description), src: "internal" }); }
+    return { view: { title: safeStr(v.title), id: safeStr(v.id) },
+        internalForm: src !== v, controls: res };
+};
+// Прямоугольник контрола внутренней формы в ЭКРАННЫХ координатах + клик мышью по центру.
+// Последний путь к гриду данных редактора (клавиатура окном глотается).
+// №28 (v1.12): РЕАЛИЗОВАНО через DynamicWrapperX — клик из тика моста живёт в
+// UI-потоке конфигуратора, события не блокируются extra-info-гвардом 1С
+// (SetCursorPos/mouse_event со СТОРОНЫ станции 1С-UI игнорирует — проверено
+// 14.11.2026 пробой на сессии empty_mcp). Гвард mouse_click: координаты обязаны
+// быть в пределах ЭКРАНА и главный HWND сессии должен быть под курсором
+// (защита от клика в чужое окно при смещении меню).
+var __dwxMouse = null;
+function _dwxMouse() {
+    if (!__dwxMouse) {
+        var dwx = new ActiveXObject("DynamicWrapperX");
+        // MemAlloc/MemFree/NumGet — ВСТРОЕННЫЕ методы DWX, Register'ить их
+        // нельзя (GetProcAddress не находит → «Функция не найдена», v1.12)
+        dwx.Register("USER32.DLL", "SetCursorPos", "i=ll", "r=l");
+        dwx.Register("USER32.DLL", "mouse_event", "i=lllll");
+        dwx.Register("USER32.DLL", "GetWindowRect", "i=hu", "r=l");
+        dwx.Register("USER32.DLL", "GetForegroundWindow", "r=h");
+        dwx.Register("KERNEL32.DLL", "Sleep", "i=l");
+        __dwxMouse = dwx;
+    }
+    return __dwxMouse;
+}
+OPS.control_rect = function (a) {
+    var hwnd = a.hwnd;
+    if (!hwnd) throw new Error("control_rect: обязателен hwnd");
+    var dwx = _dwxMouse();
+    var mem = dwx.MemAlloc(16); // RECT: 4 x int32
+    try {
+        if (!dwx.GetWindowRect(hwnd, mem))
+            throw new Error("GetWindowRect вернул 0 (hwnd мёртв?)");
+        return { left: dwx.NumGet(mem, 0, "l"), top: dwx.NumGet(mem, 4, "l"),
+            right: dwx.NumGet(mem, 8, "l"), bottom: dwx.NumGet(mem, 12, "l") };
+    } finally { dwx.MemFree(mem); }
+};
+// №28/29 (v1.13): UNICODE-ввод из тика (SendInput KEYEVENTF_UNICODE по одному
+// символу — массив структур не нужен). Станционный SendInput блокируется
+// extra-info-гвардом 1С (проверено 15.11: поле поиска осталось пустым).
+// INPUT x64 = 48 байт: type@0 (1=KEYBOARD), wVk@8(0), wScan@10, dwFlags@12,
+// time@16, extra@24. Управляющие (<0x20) пропускаются.
+var __dwxType = null;
+function _dwxType() {
+    if (!__dwxType) {
+        var dwx = new ActiveXObject("DynamicWrapperX");
+        // keybd_event — ПЛОСКИЕ параметры (SendInput требует массив INPUT,
+        // DWX его не собирает; KEYEVENTF_UNICODE в keybd_event тоже жив)
+        dwx.Register("USER32.DLL", "keybd_event", "i=hhll");
+        dwx.Register("KERNEL32.DLL", "Sleep", "i=l");
+        __dwxType = dwx;
+    }
+    return __dwxType;
+}
+OPS.type_text = function (a) {
+    var text = String(a.text || "");
+    var delay = (typeof a.delay_ms === "number" && a.delay_ms >= 0) ? a.delay_ms : 30;
+    if (!text) throw new Error("type_text: обязателен text");
+    var dwx = _dwxType();
+    var sent = 0, skipped = 0;
+    for (var i = 0; i < text.length; i++) {
+        var code = text.charCodeAt(i);
+        if (code < 0x20 || code > 0xFFFD) { skipped++; continue; }
+        dwx.keybd_event(0, code, 0x4000, 0);     // UNICODE down
+        dwx.keybd_event(0, code, 0x4002, 0);     // UNICODE | KEYUP
+        sent++;
+        dwx.Sleep(delay);
+    }
+    return { ok: true, sent: sent, skipped: skipped };
+};
+
+OPS.mouse_click = function (a) {
+    var x = a.x, y = a.y;
+    if (typeof x !== "number" || typeof y !== "number")
+        throw new Error("mouse_click: обязателен {x, y} (экранные координаты)");
+    var dwx = _dwxMouse();
+    function stage(name, fn) {
+        try { return { v: fn() }; }
+        catch (e) { throw new Error("mouse_click этап '" + name + "': " +
+            (e.description || e.message || String(e))); }
+    }
+    stage("_dwxMouse", function () { return _dwxMouse(); });
+    // №28: pid-гвард через foreground/GetWindowThreadProcessId убран —
+    // повторный DWX.Register на живом объекте падает «Объект не поддерживает»
+    // (v1.12); защиту даёт сервер: activate_window перед кликом + координаты
+    // из скриншота окна этой сессии.
+    stage("SetCursorPos", function () {
+        if (!dwx.SetCursorPos(x, y)) throw new Error("вернул 0"); return null; });
+    stage("Sleep60", function () { dwx.Sleep(60); return null; });
+    stage("LEFTDOWN", function () { dwx.mouse_event(2, 0, 0, 0, 0); return null; });
+    stage("Sleep70", function () { dwx.Sleep(70); return null; });
+    stage("LEFTUP", function () { dwx.mouse_event(4, 0, 0, 0, 0); return null; });
+    stage("Sleep80", function () { dwx.Sleep(80); return null; });
+    return { ok: true, x: x, y: y };
+};
+
+// Клавиша в окно фокуса: Insert (добавить в гриде данных), Enter (открыть в
+// менеджере расширений, этап 13), PgUp/PgDn. Вызов корректен ТОЛЬКО после
+// view_activate (фокус в нужном окне, не в дереве — иначе клавиша уйдёт в дерево!)
+OPS.key_send = function (a) {
+    var keys = (a.keys && a.keys.length) ? a.keys : [a.key];
+    for (var i = 0; i < keys.length; i++) {
+        var key = keys[i];
+        var okKey = (key === 0x2D) || (key === 0x21) || (key === 0x22) || (key === 0x0D) || (key === 0x09);
+        if (!okKey) throw new Error("разрешены Ins/PgUp/PgDn/Enter/Tab, получено " + key);
+    }
+    var av = null; try { av = windows.getActiveView(); } catch (e0) {}
+    var t = av ? safeStr(av.title) : null;
+    if (!t || String(t).indexOf("онфигурация") === 0)
+        throw new Error("фокус в дереве метаданных — клавиши запрещены; сначала view_activate");
+    var hwnd = winApi.getFocus();
+    if (!hwnd) throw new Error("нет фокуса ввода");
+    // Ctrl+клавиша (закладки редактора = Ctrl+PgDn/PgUp)
+    var ctrl = !!a.ctrl;
+    if (ctrl) winApi.sendMessage(hwnd, 0x100, 0x11, 0x011D0001);
+    for (var j = 0; j < keys.length; j++) {
+        winApi.sendMessage(hwnd, 0x100, keys[j], 0x01520001);
+        winApi.sendMessage(hwnd, 0x101, keys[j], 0xC1520001);
+    }
+    if (ctrl) winApi.sendMessage(hwnd, 0x101, 0x11, 0xC11D0001);
+    return { sent: keys.length, ctrl: ctrl, activeTitle: t };
+};
+
+// Активировать MDI-окно представления (view.activate(), как CfgStore.js) и вернуть
+// активное представление — база для клавиатуры в редакторе объекта
+OPS.view_activate = function (a) {
+    var v = findViewByTitle(String(a.title));
+    if (!v) throw new Error("представление не найдено: " + a.title);
+    var ok = null;
+    try { ok = v.activate(); } catch (e) { throw new Error("activate: " + e.description); }
+    var av = null; try { av = windows.getActiveView(); } catch (e2) {}
+    return { activated: ok, activeTitle: av ? safeStr(av.title) : null };
+};
+
+// Послать событие контролу внутренней формы открытого окна (диагностика/клик
+// по кнопке грида данных). Только для окон по подстроке заголовка; код события 0 —
+// клик (как в конструкторе форм этапа 7)
+OPS.control_send_event = function (a) {
+    var v = findViewByTitle(String(a.title));
+    if (!v) throw new Error("представление не найдено: " + a.title);
+    var f = null;
+    try { f = v.getInternalForm(); } catch (e0) {}
+    if (!f) throw new Error("у представления нет внутренней формы");
+    var c = f.getControl(a.control);
+    if (!c) throw new Error("контрол не найден: " + a.control);
+    var ev = (a.event === undefined) ? 0 : a.event;
+    f.sendEvent(c.id, ev);  // sendEvent у ФОРМЫ (как конструктор форм в этапе 7)
+    var after = null;
+    try { after = safeStr(c.value); } catch (e2) {}
+    return { control: a.control, id: safeStr(c.id), valueAfter: after };
+};
+
+// Перебор команд представления (из спайка): доступные команды с подписями
+OPS.view_cmd_scan = function (a) {
+    var v = a.title !== undefined ? findViewByTitle(String(a.title)) : viewByPath(a.view);
+    if (!v) throw new Error("представление не найдено: " + (a.title || a.view));
+    var res = [], groups = a.groups || [];
+    var calls = 0, errors = 0, nulls = 0;
+    for (var g = 0; g < groups.length; g++)
+        for (var n = (a.from || 0); n <= (a.to || 120); n++) {
+            var st = null;
+            calls++;
+            try { st = v.getCmdState(groups[g], n); }
+            catch (e) { errors++; continue; }
+            if (!st) { nulls++; continue; }
+            if (st.enabled || st.text) res.push({ group: groups[g], num: n,
+                enabled: st.enabled, text: safeStr(st.text) });
+        }
+    return { view: viewInfo(v, a.view), calls: calls, errors: errors, found: res };
+};
+
+// ---------- трасса (диагностика) ----------
+
+var trace = null;
+function traceMsg(p) { try { if (trace) trace.messages.push(String(p.text)); } catch (e) {} }
+function traceMd(e) {
+    try {
+        if (!trace) return;
+        var r = { kind: e.kind, request: e.request };
+        try { if (e.obj) r.obj = { name: String(e.obj.name), id: String(e.obj.id), cls: String(e.obj.mdclass.name(1)) }; } catch (x) { r.objErr = x.description; }
+        try { if (e.parentObj) r.parent = { name: String(e.parentObj.name), id: String(e.parentObj.id) }; } catch (x) { r.parentErr = x.description; }
+        trace.md.push(r);
+    } catch (x) {}
+}
+function traceModal(d) { try { if (trace) trace.modals.push({ stage: d.stage, caption: safeStr(d.caption) }); } catch (e) {} }
+function traceBox(m) { try { if (trace) trace.boxes.push({ caption: safeStr(m.caption), text: safeStr(m.text), type: m.type }); } catch (e) {} }
+OPS.trace_start = function (a) {
+    if (trace) throw new Error("трасса уже идёт");
+    trace = { messages: [], md: [], modals: [], boxes: [], startedAt: new Date().getTime() };
+    events.connect(windows, "onMessage", SelfScript.self, "traceMsg");
+    events.connect(metadata, "MetaDataEvent", SelfScript.self, "traceMd");
+    events.connect(windows, "onDoModal", SelfScript.self, "traceModal");
+    events.connect(windows, "onMessageBox", SelfScript.self, "traceBox");
+    setCmdTrace(true);
+    return "трасса включена";
+};
+OPS.trace_stop = function (a) {
+    setCmdTrace(false);
+    try { events.disconnect(windows, "onMessage", SelfScript.self, "traceMsg"); } catch (e) {}
+    try { events.disconnect(metadata, "MetaDataEvent", SelfScript.self, "traceMd"); } catch (e) {}
+    try { events.disconnect(windows, "onDoModal", SelfScript.self, "traceModal"); } catch (e) {}
+    try { events.disconnect(windows, "onMessageBox", SelfScript.self, "traceBox"); } catch (e) {}
+    var t = trace; trace = null;
+    return t;
+};
+
+// ---------- служебное ----------
+
+// Состояние запроса по id: done (кэш) | running | queued | unknown.
+OPS.wait = function (a) {
+    var id = String(a.id || "");
+    if (!/^[A-Za-z0-9._-]+$/.test(id)) throw new Error("недопустимый id: " + id);
+    if (respCache.hasOwnProperty(id)) return { id: id, state: "done" };
+    if (running && running.id == id) return { id: id, state: "running" };
+    if (fso.FileExists(REQ_DIR + id + ".json")) return { id: id, state: "queued" };
+    return { id: id, state: "unknown" };
+};
+
+OPS.timer_stats = function (a) { return stat; };
+
+// Поднять окно конфигуратора ОТДЕЛЬНОЙ операцией: эффект AppActivate доходит
+// очередью сообщений после тика, поэтому активация и нажатия — в разных тиках
+// (сервер ждёт focusHwnd перед операциями дерева).
+OPS.activate_self = function (a) {
+    var had = winApi.getFocus();
+    var ok = false;
+    try {
+        var sh = new ActiveXObject("WScript.Shell");
+        if (!had) sh.SendKeys("%");
+        ok = !!sh.AppActivate(myPid);
+    } catch (e) { stat.lastError = "activate_self: " + e.description; }
+    return { hadFocus: !!had, appActivate: ok, focus: winApi.getFocus() || 0 };
+};
+
+// Диагностика фокуса ввода: hwnd окна фокуса, модальность, активное представление.
+// Нажатия клавиш (md_add_child/md_delete) идут в окно фокуса; 0 — окно конфигуратора
+// в фоне, сервер должен активировать его (winutils.activate_window).
+OPS.focus_probe = function (a) {
+    var av = null; try { av = windows.getActiveView(); } catch (e) {}
+    return { focusHwnd: winApi.getFocus() || 0, modalMode: windows.modalMode,
+        activeTitle: av ? safeStr(av.title) : null };
+};
+
+// ---------- сессия ----------
+
+function connString() {
+    try { return СтрокаСоединенияИнформационнойБазы(); } catch (e) { return "?" + e.description; }
+}
+function platformVersion() {
+    try { return v8New("СистемнаяИнформация").ВерсияПриложения; } catch (e) { return "?" + e.description; }
+}
+var sessionBase = { pid: myPid, conn: connString(), platform: platformVersion(), bridge: BRIDGE_VERSION };
+
+function containersInfo() {
+    var conts = [];
+    for (var i = 0; i < metadata.openedCount; i++) {
+        var c = null;
+        try { c = metadata.getContainer(i); } catch (e) { conts.push({ index: i, error: String(e.description) }); continue; }
+        var rec = { index: i, identifier: safeStr(c.identifier), isModified: !!c.isModified,
+            root: c.rootObject ? String(c.rootObject.name) : null,
+            rootId: c.rootObject ? String(c.rootObject.id) : null };
+        try { rec.master = c.masterContainer ? safeStr(c.masterContainer.identifier) : null; } catch (e) { rec.master = null; }
+        try { rec.isCurrent = !!(c.rootObject && metadata.current.rootObject && c.rootObject.isSame(metadata.current.rootObject)); } catch (e) { rec.isCurrent = false; }
+        conts.push(rec);
+    }
+    return conts;
+}
+
+function writeSession(light) {
+    try {
+        var o = { pid: sessionBase.pid, conn: sessionBase.conn, platform: sessionBase.platform,
+            bridge: BRIDGE_VERSION, heartbeat: new Date().getTime(), stat: stat,
+            modal: windows.modalMode };
+        if (!light) o.containers = containersInfo();
+        if (running) o.running = running;
+        writeUtf8Atomic(sessionFile, JSON.stringify(o));
+    } catch (e) { stat.lastError = "writeSession: " + e.description; }
+}
+
+// ---------- цикл ----------
+
+function cacheResponse(id, text) {
+    if (text.length > 1048576) return; // большие ответы (module_get with_text) не кэшируем
+    respCache[id] = text;
+    respCacheOrder.push(id);
+    while (respCacheOrder.length > RESP_CACHE_MAX) {
+        var old = respCacheOrder.shift();
+        delete respCache[old];
+    }
+}
+
+function nextRequest() {
+    var e = new Enumerator(fso.GetFolder(REQ_DIR).Files);
+    var best = null;
+    for (; !e.atEnd(); e.moveNext()) {
+        var f = e.item();
+        if (!/\.json$/i.test(f.Name)) continue;
+        if (best === null || f.Name < best.Name) best = f;
+    }
+    return best;
+}
+
+function whereCtx(op, args) {
+    var w = { op: String(op) };
+    if (args) {
+        if (args.container !== undefined) w.container = args.container;
+        if (args.path !== undefined) w.path = args.path;
+        if (args.uuid !== undefined) w.uuid = args.uuid;
+        if (args.ownerPath !== undefined) w.ownerPath = args.ownerPath;
+        if (args.prop !== undefined) w.prop = args.prop;
+    }
+    return w;
+}
+
+function handle(file) {
+    var id = file.Name.replace(/\.json$/i, "");
+    // имя запроса — только безопасные символы (файл ответа пишется под этим именем)
+    if (!/^[A-Za-z0-9._-]+$/.test(id)) {
+        stat.errors++; stat.lastError = "плохое имя запроса: " + file.Name;
+        try { fso.DeleteFile(file.Path, true); } catch (e) {}
+        return;
+    }
+    var path = file.Path;
+    var respPath = RESP_DIR + id + ".json";
+    // идемпотентность: повтор id — прежний ответ, без выполнения.
+    // Файл запроса удаляется и здесь, иначе он обрабатывается каждый тик и блокирует
+    // запросы, сортирующиеся после него (nextRequest берёт старейший)
+    if (respCache.hasOwnProperty(id)) {
+        try { fso.DeleteFile(path, true); } catch (e) {}
+        writeUtf8Atomic(respPath, respCache[id]);
+        stat.replayed++;
+        return;
+    }
+    var resp = { id: id, ok: false, tick: stat.ticks };
+    var t0 = new Date().getTime();
+    var req = null;
+    try {
+        req = JSON.parse(readUtf8(path));
+        try { fso.DeleteFile(path, true); } catch (eDel) {}
+        var op = req && typeof req.op == "string" ? req.op : null;
+        resp.where = whereCtx(op, req ? req.args : null);
+        if (!op || !OPS.hasOwnProperty(op))
+            resp.error = { code: "unknown_op", message: "неизвестная операция " + op, where: resp.where };
+        else if (req.deadline && new Date().getTime() > req.deadline)
+            resp.error = { code: "deadline", message: "истёк срок запроса", where: resp.where };
+        else {
+            // Трассировка текущей операции в реестре: при зависании/падении видно,
+            // какая операция выполнялась (журнал движка буферизуется и обрывается раньше).
+            running = { id: id, op: op, startedAt: t0 };
+            writeSession();
+            try {
+                resp.result = OPS[op](req.args || {});
+                resp.ok = true;
+            } finally {
+                if (running) { running = null; writeSession(); }
+            }
+        }
+    } catch (e) {
+        stat.errors++;
+        resp.error = { code: "exception", message: errStr(e),
+            where: resp.where || { op: req && req.op } };
+        try { if (fso.FileExists(path)) fso.DeleteFile(path, true); } catch (e2) {}
+    }
+    resp.ms = new Date().getTime() - t0;
+    var text;
+    try { text = JSON.stringify(resp); }
+    catch (e) { text = JSON.stringify({ id: id, ok: false, error: { code: "serialize", message: String(e.description) } }); }
+    try {
+        writeUtf8Atomic(respPath, text);
+        cacheResponse(id, text);
+    } catch (eWrite) { stat.lastError = "запись ответа " + id + ": " + eWrite.description; }
+    stat.done++;
+}
+
+function onTick(timerID) {
+    try {
+        stat.ticks++;
+        if (busy) { stat.ticksBusy++;
+            // heartbeat в долгой операции: лёгкая запись БЕЗ containersInfo
+            // (метаданные из вложенного тика не трогаем) — иначе живая сессия
+            // выглядит мёртвой (ревью 25.10.2026)
+            if (stat.ticksBusy % 40 == 1) writeSession(true);
+            return; }
+        if (windows.modalMode != 0) { stat.ticksInModal++; if (stat.ticksInModal % 20 == 1) writeSession(); return; }
+        if (!fso.FileExists(ENABLE_FILE)) return;
+        if (stat.ticks % 20 == 0) setDumpModals(); // подключение wizard-раннера и дампера — не только на старте
+        busy = true;
+        try {
+            var f = nextRequest();
+            if (f) handle(f);
+            if (stat.ticks % 10 == 0 || f) writeSession();
+        } finally {
+            busy = false;
+        }
+    } catch (e) {
+        stat.errors++;
+        stat.lastError = "tick: " + (e.description || e.message || e);
+    }
+}
+
+if (fso.FileExists(ENABLE_FILE)) {
+    if (typeof JSON == "undefined") {
+        writeUtf8Atomic(ROOT + "mcp_bridge-JSCRIPT58-REQUIRED.txt",
+            "Мост не запущен: нужен JScript 5.8 (JSON). " + new Date().getTime());
+    } else {
+    if (!fso.FolderExists(SESSION_DIR)) fso.CreateFolder(SESSION_DIR);
+    if (!fso.FolderExists(REQ_DIR)) fso.CreateFolder(REQ_DIR);
+    if (!fso.FolderExists(RESP_DIR)) fso.CreateFolder(RESP_DIR);
+    // журнал MetaDataEvent (этап 18): постоянная подписка — все изменения
+    // метаданных пишутся в journal/<pid>.jsonl (UTF-16, append); src=agent по busy;
+    // настройки — <mcp>\mcp_bridge.cfg.json (v1.2: вкл/выкл, фильтр видов, ротация)
+    readBridgeCfg();
+    if (!fso.FolderExists(JOURNAL_DIR)) fso.CreateFolder(JOURNAL_DIR);
+    try { events.connect(metadata, "MetaDataEvent", SelfScript.self, "onMdJournal"); }
+    catch (eJ) { writeUtf8Atomic(SESSION_DIR + "journal-error.txt", String(eJ.description || eJ.message || eJ)); }
+    writeSession();
+    timerId = createTimer(TIMER_MS, SelfScript.self, "onTick");
+    }
+}
+
+// Режим снятия модальных диалогов (флаг mcp_dump_modals.on рядом с mcp_bridge.on):
+// обработчик исполняется из простоя ДАЖЕ при открытом модальном окне (спайк, опыт 5),
+// поэтому снимает caption и контролы любого диалога — и команд моста, и чужих
+// (в т.ч. штатных мастеров пакетных операций, где тики заблокированы инвариантом 2).
+// Только запись, ничего не закрывает и не правит.
+var dumpModalsOn = false;
+function onDumpModal(d) {
+    try {
+        if (!dumpModalsOn || d.stage != 1) return;
+        var rec = { caption: safeStr(d.caption), controls: null, err: null };
+        try { rec.controls = listControls(d.form); } catch (e) { rec.err = String(e.description); }
+        writeUtf8Atomic(SESSION_DIR + "modals.jsonl", readModalsLog() + JSON.stringify(rec) + "\n");
+    } catch (e) {}
+}
+function readModalsLog() {
+    try { return readUtf8(SESSION_DIR + "modals.jsonl"); } catch (e) { return ""; }
+}
+
+// Универсальный мастер-раннер (флаг mcp_stg_wizard.json): автоматизация штатных
+// модальных диалогов по шагам {click/set/clickIndex/report}, как конструктор форм
+// этапа 7. Формат: {"dialogs": [{"caption": "...", "steps": [...]}, ...]}.
+// Нужен для мастеров, которые пакетная команда открывает сама (например
+// /ConfigurationRepositoryCreate — командные ключи его поля не заполняют,
+// проверено 24.10.2026). Все действия и значения — только из флаг-файла.
+var wizardJob = null;
+function loadWizardJob() {
+    try {
+        if (!fso.FileExists(ROOT + "mcp_stg_wizard.json")) return null;
+        var j = JSON.parse(readUtf8(ROOT + "mcp_stg_wizard.json"));
+        if (j.dialogs) return j;
+        if (j.caption) return { dialogs: [j] };  // старый формат — один диалог
+        return null;
+    } catch (e) { stat.lastError = "wizard.json: " + e.description; return null; }
+}
+function reportControl(form, name, out) {
+    try { out.push(name + "=" + safeStr(form.getControl(name).value)); }
+    catch (e) { out.push(name + ": " + e.description); }
+}
+function reportAllControls(form, out) {
+    try {
+        for (var i = 0; i < form.controlsCount; i++) {
+            var c = form.getControl(i);
+            var nm = safeStr(c.name);
+            if (nm) out.push(nm + "=" + safeStr(c.value));
+        }
+    } catch (e) { out.push("reportAll: " + e.description); }
+}
+function onWizardModal(d) {
+    try {
+        if (d.stage != 1) return;
+        // не вмешиваться в диалоги, перехваченные операцией моста: порядок
+        // обработчиков не гарантирован, а wizard нажимает кнопки без проверки
+        // заголовка политики (инвариант 6) — ревью 25.10.2026, HIGH-риск пересечения.
+        // ИСКЛЮЧЕНИЕ (регресс 27.10.2026 на 1.6.43): md_add_child с политикой leave
+        // СОЗНАТЕЛЬНО отдаёт конструктор мастеру — guard блокировал ОК, конструктор
+        // висел; caption всё равно проверяется ниже, чужие диалоги не трогаем
+        var leaveYield = addCapture && addCapture.modalPolicy == "leave";
+        if (!leaveYield && (stgCapture || updCapture || addCapture || delCapture ||
+            pendingArchive || probeCapture || synCapture || pendingLoad)) return;
+        // флаг перечитывается на каждом диалоге: правки флаг-файла действуют
+        // и в уже запущенном конфигураторе
+        wizardJob = loadWizardJob();
+        if (!wizardJob) return;
+        var job = null;
+        for (var dj = 0; dj < wizardJob.dialogs.length; dj++)
+            if (String(wizardJob.dialogs[dj].caption) == String(d.caption)) { job = wizardJob.dialogs[dj]; break; }
+        if (!job) return;
+        var log = { caption: safeStr(d.caption), steps: [], done: false };
+        try {
+            var steps = job.steps || [];
+            for (var si = 0; si < steps.length; si++) {
+                var st = steps[si], out = [];
+                try {
+                    if (st.set) for (var sn in st.set) if (st.set.hasOwnProperty(sn)) {
+                        d.form.getControl(sn).value = st.set[sn];
+                        reportControl(d.form, sn, out);
+                    }
+                    if (st.click) {
+                        d.form.sendEvent(d.form.getControl(st.click).id, 0);
+                        out.push("нажата " + st.click);
+                    }
+                    // у message box имена контролов пустые — клик по индексу
+                    if (st.clickIndex !== undefined) {
+                        d.form.sendEvent(d.form.getControl(st.clickIndex).id, 0);
+                        out.push("нажат контрол[" + st.clickIndex + "]");
+                    }
+                    if (st.report) for (var ri = 0; ri < st.report.length; ri++)
+                        reportControl(d.form, st.report[ri], out);
+                    if (st.reportAll) reportAllControls(d.form, out);
+                } catch (e) { out.push("ошибка шага " + si + ": " + e.description); }
+                log.steps.push({ step: si, out: out });
+            }
+            log.done = true;
+        } catch (e) { log.err = String(e.description); }
+        writeUtf8Atomic(SESSION_DIR + "wizard.log", readModalsWizardLog() + JSON.stringify(log) + "\n");
+    } catch (e) {}
+}
+function readModalsWizardLog() {
+    try { return readUtf8(SESSION_DIR + "wizard.log"); } catch (e) { return ""; }
+}
+function setDumpModals() {
+    try {
+        var want = fso.FileExists(ROOT + "mcp_dump_modals.on");
+        if (want && !dumpModalsOn) {
+            events.connect(windows, "onDoModal", SelfScript.self, "onDumpModal");
+            dumpModalsOn = true;
+        } else if (!want && dumpModalsOn) {
+            events.disconnect(windows, "onDoModal", SelfScript.self, "onDumpModal");
+            dumpModalsOn = false;
+        }
+        wizardJob = loadWizardJob();
+        if (wizardJob) {
+            try { events.disconnect(windows, "onDoModal", SelfScript.self, "onWizardModal"); } catch (e) {}
+            events.connect(windows, "onDoModal", SelfScript.self, "onWizardModal");
+        }
+    } catch (e) { stat.lastError = "dumpModals: " + e.description; }
+}
+setDumpModals();
+
+function macrosСтатусМоста() {
+    Message("mcp_bridge " + BRIDGE_VERSION + ": pid " + myPid + ", тиков " + stat.ticks + ", в модальном " + stat.ticksInModal + ", при busy " + stat.ticksBusy + ", выполнено " + stat.done + ", повторов " + stat.replayed + ", ошибок " + stat.errors + (stat.lastError ? ", последняя: " + stat.lastError : ""));
+}
