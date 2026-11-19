@@ -1,0 +1,72 @@
+ПОСТАВКА mcp-configurator v1.18.0 (18.11.2026)
+
+Состав:
+  install.ps1          — установщик (PowerShell, прав админа не требует)
+  snegopat-client-3.0.66.zip — Снегопат 3.0.66 (стоковый, полный); установщик
+                         распаковывает и preseed'ит загрузку моста. Совместим
+                         также 3.0.87 (проверено: docs/snegopat-3087-compat.md);
+                         на 8.5.1 нужен именно 3.0.87 (слоты вендора)
+  mcp-configurator/    — проект: MCP-сервер (71 MCP-инструмент + 3 CLI),
+                         мост (исходник), пакетные cf-инструменты (build_ext,
+                         cf_diff, cf_inspect, cf_recdiff, ref_check, mcp_to_line,
+                         mockup_init, form_xml, eventlog_cfg, cf_dump_json,
+                         cf_arbiter, renovate_ext, release_github), тесты, доки
+  bin/                 — DynamicWrapperX 2.2.0.0 (dynwrapx.dll x64 + x86 + справка)
+  README.md, RELEASE_NOTES.md, RELEASES.md (история релизов),
+  РУКОВОДСТВО-АДМИНИСТРАТОРА.md, РУКОВОДСТВО-ПОЛЬЗОВАТЕЛЯ.md — документация
+  (руководства и памятка также в Word: РУКОВОДСТВО-*.docx, УСТАНОВКА.docx)
+  ПРОГОН-ИНСТРУМЕНТОВ-v1.17.md/.docx — реестр проверки инструментов для прогона
+
+Требования:
+  Windows 10+; платформа 1С 8.3.27 (x64 Конфигуратор; проверено .2074/.2130);
+  Python >= 3.11 и < 3.14 в PATH (uiaautomation не совместим с 3.14+ — issue
+  #24 v1.17; вне диапазона ставится всё, кроме UI-контура); доступ к PyPI;
+  путь установки БЕЗ кириллицы; диск — ЛЮБОЙ (путь-независимость с v1.2.0,
+  задаётся ключом -HomeDir)
+
+Установка (из корня распакованной поставки):
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File install.ps1
+Ключи: -HomeDir C:\Snegopat-mcp | -SnegopatZip <путь> | -SkipPip | -SkipSnegopat
+
+Установщик: проверяет платформу/Python, ставит Снегопат из zip (многоверсионно:
+snegopat\<версия>\, прежняя сборка не сносится), создаёт каталоги моста и флаг
+включения, создаёт конфиг сервера (допишите свои базы в own_bases), регистрирует
+DynamicWrapperX per-user (HKCU, без админа), копирует проект, делает
+pip install -e "server[win-ui]" и всегда ставит pywin32+uiautomation (UI-контур;
+при -SkipPip тоже — отказ только предупреждение), запускает стартер (резидентный
+инжектор, cwd = x64 — важно; инъекцию новых 1cv8 проверяйте по logs/inject.log).
+
+Дальше вручную (подсказки печатает установщик):
+  1. ZCode -> ~/.zcode/cli/config.json -> mcp.servers -> "mcp-snegopat": {"command": "mcp-snegopat"}
+  2. own_bases в <HomeDir>\mcp\mcp_snegopat.json
+  3. Живой запуск конфигуратора: строго 1cv8.exe DESIGNER /F <база>
+     (без слова DESIGNER откроется лаунчер «Запуск 1С:Предприятия» и повиснет).
+  4. Проверка: list_sessions / ping в ZCode при открытом конфигураторе.
+
+Известные проблемы v1.17 (см. issues #21/#22/#24 — правятся в v1.18):
+  - query_validate: при особых состояниях ИБ COM-вызов может не вернуть
+    управление — параметр timeout_s (дефолт 60) даёт отказ, но на некоторых
+    станциях наблюдалось отсутствие таймаута (уточняется);
+  - modal-guard не ловил диалоги без modalMode, перехватившие foreground
+    (например «О программе») — в v1.18 детекция добавлена, но класс не полный;
+  - uv на Python 3.14+: верхняя граница добавлена в extra win-ui; uv run на
+    3.15.2 с прошлой версией падал «No solution found».
+
+Что умеет (полностью — README.md, RELEASE_NOTES.md, RELEASES.md):
+  - живой конфигуратор: метаданные (создание/удаление/клон/переименование
+    с переписыванием ссылок), модули (set/patch по хешу), формы (XML-контур),
+    расширения (создание/открытие менеджера/cfe), хранилище (захват/коммит);
+  - UI-контур из тика моста: mouse_click, menu_invoke по карте (с подменю и
+    MRQ), uia_tree (навигация по дереву через UIA), uia_menu_map, type_text,
+    uia_dialog_read, user_watch (регистратор действий, VK-коды);
+  - «Сделай как я» (player): классификация действий пользователя, аудит
+    покрытия моста (uncovered — кандидаты в IDEAS), воспроизведение;
+  - uia_value_probe: ввод текста в поля 1С через UIA ValuePattern (мимо
+    клавиатуры — фильтр UNICODE не действует);
+  - конвейер «расширение из сравнения двух cf» (ext_build_from_cf, в т.ч.
+    фоновый action=start/status); renovate_ext — конвейер идей одним прогоном;
+  - cf-инструменты без платформы: diff/inspect/recdiff/dump_json/arbiter;
+  - query_validate/infobase/eventlog через COM (учётка user/password,
+    timeout_s); journal_dashboard, md_journal; spec_check — сверка ТЗ с БД;
+  - MCP over HTTP с auth-token (удалённая станция), пресеты инструментов,
+    read_only-режим.
