@@ -1,0 +1,68 @@
+# Unit tests on a stub bridge — cross-platform, no 1C/Configurator needed.
+# Same suite as .gitlab-ci.yml (kept for the internal GitLab).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.12"]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install server package
+        run: pip install -e server
+      - name: Unit tests
+        id: tests
+        shell: bash
+        run: |
+          # runner зовёт bash с -e -o pipefail: grep без совпадений (exit 1)
+          # убивал бы шаг даже при зелёных тестах — возвращаем нормальные
+          # оболочечные семантики
+          set +eo pipefail
+          python -m unittest discover -s server/tests -p "test_*.py" -v > ci_tests.txt 2>&1
+          status=$?
+          tail -25 ci_tests.txt
+          fails=$(grep -E '^(FAIL|ERROR):' ci_tests.txt | head -6 | tr '\n' ';' | cut -c1-500)
+          tailout=$(tail -2 ci_tests.txt | tr '\n' ';' | cut -c1-200)
+          echo "fails=$fails" >> "$GITHUB_OUTPUT"
+          echo "tailout=$tailout" >> "$GITHUB_OUTPUT"
+          exit $status
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-tests-${{ matrix.os }}
+          path: ci_tests.txt
+      - name: "Diag: ${{ steps.tests.outputs.fails }} || tail: ${{ steps.tests.outputs.tailout }}"
+        if: always()
+        shell: bash
+        run: grep -A12 -E '^(FAIL|ERROR):' ci_tests.txt | head -60 || true
+      - name: Push test log to ci-diag branch
+        if: failure()
+        shell: bash
+        run: |
+          git config user.email "ci-diag@local"
+          git config user.name "ci-diag"
+          git checkout --orphan ci-diag-$RUN_N 2>/dev/null || true
+          git rm -rf --cached . >/dev/null 2>&1 || true
+          mkdir -p diag
+          cp ci_tests.txt diag/ci-tests-$RUN_N-$RUNNER_OS.txt
+          git add diag
+          git commit -m "ci-diag: unit tests failure (run $RUN_N, $RUNNER_OS)"
+          git remote set-url origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git push origin "ci-diag-$RUN_N" --force
+        env:
+          RUN_N: ${{ github.run_number }}

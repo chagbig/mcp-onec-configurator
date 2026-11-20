@@ -1,0 +1,23 @@
+{
+  "root": "C:\\Snegopat-mcp\\mcp",
+  "own_bases": [],
+  "allow_store": false,
+  "allow_update_db": false,
+  "allow_unverified_platform": false,
+  "update_db_allowed_dialogs": ["реорганизация информации", "принять"],
+  "default_timeout_s": 120,
+  "long_timeout_s": 900,
+  "heartbeat_stale_s": 30,
+  "journal_enabled": true,
+  "journal_kinds": [],
+  "journal_max_mb": 20.0,
+  "journal_keep": 3,
+  "read_only": false,
+  "#presets": "№20: анализ/метаданные/формы — виден только subset (анализ|мета|формы), пусто = все",
+  "presets": [],
+  "#http": "№13/№27 (v1.7.0): MCP over streamable-http. Включается ключом --http (CLI) или http_enabled. auth_token ОБЯЗАТЕЛЕН при нелокальном http_host (иначе отказ при старте). 127.0.0.1 = только с этой машины",
+  "http_enabled": false,
+  "http_host": "127.0.0.1",
+  "http_port": 8641,
+  "auth_token": ""
+}
